@@ -9,10 +9,51 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
-// #define PBEX_ATOMIC_BEGIN()
-// #define PBEX_ATOMIC_END()
-// #define PBEX_DL_ALLOCATOR_DOUBLE_LINKED 0
-// #define PBEX_EXTERNAL_INCLUDE "pbex_port.h"
+/**
+ * \defgroup mainMacros Main macros
+ * All main macros that are used in library
+ */
+
+/**
+ * \defgroup allocators Allocators
+ * Allocators are one of the central features of pbex.
+ * You can flexible manipulate memory.
+ * \{
+ * \defgroup allocatorsTypes Allocators types
+ * \defgroup allocatorsApi Allocators API
+ * \}
+ */
+
+/**
+ * \defgroup main Main
+ * Main API and types of pbex
+ * \{
+ * \defgroup mainTypes Main types
+ * \defgroup mainApi Main API
+ * \}
+ */
+
+/**
+ * \ingroup mainMacros
+ * \{
+ *
+ * \def PBEX_ATOMIC_BEGIN()
+ * Using for sharing instances in several tasks or interrupts. It protects
+ * against race conditions.
+ *
+ * \def PBEX_ATOMIC_END() PBEX_ATOMIC_BEGIN()
+ * Using for sharing instances in several tasks or interrupts. It protects
+ * against race conditions.
+ *
+ * \def PBEX_DL_ALLOCATOR_DOUBLE_LINKED
+ * Enables or disables double-linked lists.
+ * \note This option a little bit increases RAM by sizeof(void*) for every list node.
+ *
+ * \def PBEX_EXTERNAL_INCLUDE
+ * Includes defined file in pbex.c to provide PBEX_ATOMIC_x macros functionality
+ *
+ * \}
+ */
 
 /*
  * PBEX - lightweight and comfortable way to utilize nanoPB library
@@ -23,72 +64,165 @@ extern "C"
 {
 #endif
 
-//--------------------------------------------
-
+/** \ingroup allocatorsTypes */
 typedef struct pbex_allocator pbex_allocator_t;
+/** \ingroup allocatorsTypes */
+typedef void* (*pbex_allocator_alloc_t)(pbex_allocator_t* self, size_t size); //!< Allocation function type
+/** \ingroup allocatorsTypes */
+typedef void (*pbex_allocator_dealoc_t)(pbex_allocator_t* self, void* ptr); //!< Deallocation function type
 
+/**
+ * \ingroup allocatorsTypes
+ * \brief Basic abstraction for allocation and deallocation
+ */
 struct pbex_allocator
 {
-    void* (*alloc)(pbex_allocator_t* self, size_t size);
-    void (*dealloc)(pbex_allocator_t* self, void* ptr);
+    pbex_allocator_alloc_t  alloc;   //!< Allocation method
+    pbex_allocator_dealoc_t dealloc; //!< Deallocation method
 };
 
+/**
+ * \ingroup allocatorsApi
+ * \brief Creates heap allocator
+ *
+ * \return pbex_allocator_t
+ *
+ * \note This allocator doesn't store any info about allocated instances, so
+ * you must call \ref pbex_release to release allocated data.
+ */
 pbex_allocator_t pbex_create_heap_allocator(void);
 
+/**
+ * \ingroup allocatorsTypes
+ * \brief Pool allocator.
+ * It strict sequentially allocates data in linear buffer.
+ *
+ * \note THis allocator can't deallocate memory, so you must control linear buffer.
+ * Usually it's statically allocated chunk of memory, or on-stack, but if the chunk
+ * is made using \ref malloc() - you must call \ref free().
+ */
 typedef struct
 {
-    pbex_allocator_t allocator;
+    pbex_allocator_t allocator; //!< \ref pbex_allocator_t
 
-    uint8_t* ptr;
-    size_t   size;
-    size_t   pos;
+    uint8_t* ptr;  //!< Pointer to linear buffer (must be aligned by the machine word)
+    size_t   size; //!< Size of linear buffer
+    size_t   pos;  //!< Current position for next allocation
 } pbex_pool_allocator_t;
 
+/**
+ * \ingroup allocatorsApi
+ * \brief Creates pool allocator
+ *
+ * \param ptr //!< Pointer to linear buffer
+ * \param size //!< Size of the buffer
+ *
+ * \return pbex_pool_allocator_t
+ */
 pbex_pool_allocator_t pbex_create_pool_allocator(uint8_t* ptr, size_t size);
 
+/**
+ * \ingroup allocatorsTypes
+ * \brief Disposable list allocator
+ * It can fully control memory allocation and deallocation.
+ * When you allocate some memory instances you can free them via
+ * explicit call \ref  pbex_dispose_dl_allocator or \ref pbex_delete_dl_allocator,
+ * or via \ref pbex_release.
+ *
+ * \note It uses malloc() and free() functions.
+ */
 typedef struct
 {
-    pbex_allocator_t allocator;
+    pbex_allocator_t allocator; //!< \ref pbex_allocator_t
 
     struct
     {
-        void* next;
+        void* next; //!< Pointer to next node
 #if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-        void* prev;
+        void* prev; //!< Pointer to previous node
 #endif
-    } head;
+    } head; //!< stores the first node, which hasn't got any data, but node header.
 } pbex_dl_allocator_t;
 
+/**
+ * \ingroup allocatorsApi
+ * \brief Creates (constructs) DL allocator
+ *
+ * \param allocator
+ */
 void pbex_create_dl_allocator(pbex_dl_allocator_t* allocator);
+
+/**
+ * \ingroup allocatorsApi
+ * \brief Delete allocator and free all allocated blocks.
+ *
+ * \param allocator
+ */
 void pbex_delete_dl_allocator(pbex_dl_allocator_t* allocator);
+
+/**
+ * \ingroup allocatorsApi
+ * \brief Dispose the allocator. The same as \ref pbex_delete_dl_allocator
+ *
+ * \param allocator
+ */
 void pbex_dispose_dl_allocator(pbex_dl_allocator_t* allocator);
 
-//--------------------------------------------
+/**
+ * \}
+ */
 
+/**
+ * \ingroup mainTypes
+ * \{
+ */
+
+/**
+ * \brief Full-string data type.
+ * It stores string data
+ */
 typedef struct
 {
-    size_t size;
-    char   data[];
+    size_t size;   //!< Size of block chunk (including null symbol)
+    char   data[]; //!< Null-terminated string
 } pbex_string_t;
 
+/**
+ * \brief Raw bytes data type.
+ * It stores raw data.
+ */
 typedef struct
 {
-    size_t    size;
-    pb_byte_t data[];
+    size_t    size;   //!< Size of data
+    pb_byte_t data[]; //!< Raw data
 } pbex_bytes_t;
 
+/**
+ * \brief List data type
+ * It stores data for repeated fields. List was selected instead of array
+ * because it's the most efficient container to allocate unknown numerous of instances
+ * without reallocations, although it consumes a bit more memory per instance (by sizeof(void*)).
+ */
 typedef struct pbex_list_node pbex_list_node_t;
 typedef struct
 {
-    pbex_allocator_t* allocator;
-    size_t            item_size;
-    pbex_list_node_t* head;
-    pbex_list_node_t* tail;
+    pbex_allocator_t* allocator; //!< Pointer to allocator for future allocating
+    size_t            item_size; //!< Item size
+    pbex_list_node_t* head;      //!< Pointer to the first node
+    pbex_list_node_t* tail;      //!< Pointer to the last node
 } pbex_list_t;
 
 /**
+ * \}
+ */
+
+/**
+ * \addtogroup mainApi
+ * \{
+ */
+
+/**
  * \brief Empty buffer. Usefull to encount total bytes for encoding
- *
  *
  * \return pb_ostream_t
  */
@@ -280,6 +414,10 @@ const pbex_string_t* pbex_get_string(pb_callback_t callback);
  * \return const char*
  */
 const char* pbex_get_cstring(pb_callback_t callback);
+
+/**
+ * \}
+ */
 
 #ifdef __cplusplus
 }

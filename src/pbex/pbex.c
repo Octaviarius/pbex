@@ -18,43 +18,52 @@
 #define PBEX_DL_ALLOCATOR_DOUBLE_LINKED 0
 #endif
 
+/**
+ * \addtogroup Internal
+ * \{
+ */
+
 #define OFFSET_OF(type, member)         ((size_t)(uintptr_t) & ((type*)0)->member)
 #define CONTAINER_OF(ptr, type, member) (*(type*)((char*)(ptr)-OFFSET_OF(type, member)))
 
 #define ALIGN(val, size)                (((val) + (size)-1) & ~((size)-1))
 
-//-----------------------------------------------
-
+/** Internal representation of list node */
 struct pbex_list_node
 {
-    pbex_list_node_t* next;
-    uint8_t           data[];
+    pbex_list_node_t* next;   //!< Pointer to next node
+    uint8_t           data[]; //!< Payload
 };
 
-//-----------------------------------------------
-
-typedef struct
-{
-    pbex_allocator_t* allocator;
-    pbex_list_t       list;
-} decode_list_t;
-
-//-----------------------------------------------
-
+/** Encode string callback when \ref pbex_alloc_string is used */
 static bool _encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+/** Encode string callback when \ref pbex_set_string is used */
 static bool _encode_string_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+/** Encode string callback when \ref pbex_alloc_bytes is used */
 static bool _encode_bytes(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+/** Encode bytes callback when \ref pbex_set_bytes is used */
 static bool _encode_bytes_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+/** Encode list callback when \ref pbex_alloc_list is used */
 static bool _encode_list(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 
+/** Decode string callback */
 static bool _decode_string(pb_istream_t* stream, const pb_field_t* field, void** arg);
+/** Decode bytes callback */
 static bool _decode_bytes(pb_istream_t* stream, const pb_field_t* field, void** arg);
+/** Decode oneof fields callback */
 static bool _decode_oneof(pb_istream_t* stream, const pb_field_t* field, void** arg);
+/** Decode repeated fields callback */
 static bool _decode_repeated(pb_istream_t* stream, const pb_field_t* field, void** arg);
 
+/** Calculates actual structure size just using descriptor */
+static size_t _prepare_size_of_struct(const pb_msgdesc_t* descr);
+/** Makes preparations before run decode */
 static bool _prepare_decode(pbex_allocator_t* allocator, pb_istream_t* stream, const pb_msgdesc_t* descr, void* inst);
 
-//-----------------------------------------------
+/**
+ * \}
+ */
+
 static bool _encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
 {
     bool ret = false;
@@ -236,33 +245,25 @@ static bool _decode_repeated(pb_istream_t* stream, const pb_field_t* field, void
     return ret;
 }
 
-#define MSG_PTR ((void*)100)
+#define MSG_PTR ((uint8_t*)128)
 static size_t _prepare_size_of_struct(const pb_msgdesc_t* descr)
 {
-
-    size_t size = 0;
+    uint8_t* end_ptr = NULL;
 
     pb_field_iter_t it;
     pb_field_iter_begin(&it, descr, MSG_PTR);
 
     do
     {
-        size_t end = 0;
-
-        if (it.pData)
+        uint8_t* end = (uint8_t*)it.pField + it.data_size;
+        if (end_ptr < end)
         {
-            end = (size_t)it.pData + it.data_size;
+            end_ptr = end;
         }
-        size = size < end ? end : size;
 
-        if (it.pField)
-        {
-            end = (size_t)it.pField + it.data_size;
-        }
-        size = size < end ? end : size;
     } while (pb_field_iter_next(&it));
 
-    return size - (size_t)MSG_PTR;
+    return end_ptr - MSG_PTR;
 }
 #undef MSG_PTR
 
