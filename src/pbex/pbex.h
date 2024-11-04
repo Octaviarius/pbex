@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#define PBEX_VERSION_MAJOR 1
+#define PBEX_VERSION_MINOR 1
+
 /**
  * \defgroup mainMacros Main macros
  * All main macros that are used in library
@@ -193,8 +196,8 @@ typedef struct
  */
 typedef struct
 {
-    size_t    size;   //!< Size of data
-    pb_byte_t data[]; //!< Raw data
+    size_t  size;   //!< Size of data
+    uint8_t data[]; //!< Raw data
 } pbex_bytes_t;
 
 /**
@@ -366,6 +369,35 @@ void* pbex_list_next_node(const void* node);
 pb_callback_t pbex_set_string(const pbex_string_t* str);
 
 /**
+ * \brief Get string structure
+ *
+ * \param callback
+ *
+ * \return const pbex_string_t*
+ */
+const pbex_string_t* pbex_get_string(pb_callback_t callback);
+
+/**
+ * \brief Get string data directly to variables. It's a syntax sugar.
+ *
+ * \param callback
+ * \param str_ptr
+ * \param size_ptr
+ *
+ * \return true if it's OK
+ */
+bool pbex_get_string_ptr(pb_callback_t callback, const char** str_ptr, size_t* size_ptr);
+
+/**
+ * \brief Get C-string. It gets pbex_string_t and return only pointer to data field
+ *
+ * \param callback
+ *
+ * \return const char*
+ */
+const char* pbex_get_cstring(pb_callback_t callback);
+
+/**
  * \brief Allocate bytes for encoding
  *
  * \param allocator
@@ -398,22 +430,27 @@ pb_callback_t pbex_set_bytes(const pbex_bytes_t* bytes);
 const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback);
 
 /**
- * \brief Get string structure
+ * \brief Get bytes data directly to variables. It's a syntax sugar.
  *
  * \param callback
+ * \param data_ptr
+ * \param size_ptr
  *
- * \return const pbex_string_t*
+ * \return true if it's OK
  */
-const pbex_string_t* pbex_get_string(pb_callback_t callback);
+bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr);
 
 /**
- * \brief Get C-string. It gets pbex_string_t and return only pointer to data field
+ * \brief Copy bytes directly to variable. It's a syntax sugar.
  *
  * \param callback
+ * \param data
+ * \param offset
+ * \param size
  *
- * \return const char*
+ * \return size_t
  */
-const char* pbex_get_cstring(pb_callback_t callback);
+size_t pbex_copy_bytes_to(pb_callback_t callback, void* data, size_t offset, size_t size);
 
 /**
  * \}

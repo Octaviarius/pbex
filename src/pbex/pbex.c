@@ -361,19 +361,25 @@ pb_ostream_t pbex_create_ostream_stub(void)
 
 bool pbex_encode(pb_ostream_t* stream, const pb_msgdesc_t* descr, const void* inst)
 {
-    return pb_encode(stream, descr, inst);
+    if (stream && descr && inst)
+    {
+        return pb_encode(stream, descr, inst);
+    }
+
+    return false;
 }
 
 bool pbex_decode(pbex_allocator_t* allocator, pb_istream_t* stream, const pb_msgdesc_t* descr, void* inst)
 {
-    bool ret = _prepare_decode(allocator, stream, descr, inst);
-
-    if (ret)
+    if (allocator && stream && descr && inst)
     {
-        ret = pb_decode(stream, descr, inst);
+        if (_prepare_decode(allocator, stream, descr, inst))
+        {
+            return pb_decode(stream, descr, inst);
+        }
     }
 
-    return ret;
+    return false;
 }
 
 bool pbex_encode_to_buffer(const pb_msgdesc_t* descr, const void* inst, void* buffer, size_t* size)
@@ -689,6 +695,50 @@ pb_callback_t pbex_set_string(const pbex_string_t* str)
     };
 }
 
+const pbex_string_t* pbex_get_string(pb_callback_t callback)
+{
+    if (callback.funcs.encode == _encode_string || callback.funcs.encode == _encode_string_static)
+    {
+        return (const pbex_string_t*)callback.arg;
+    }
+    else if (callback.funcs.decode == _decode_string)
+    {
+        return (const pbex_string_t*)callback.arg;
+    }
+    else
+    {
+        return NULL;
+    }
+}
+
+bool pbex_get_string_ptr(pb_callback_t callback, const char** str_ptr, size_t* size_ptr)
+{
+    const pbex_string_t* str = pbex_get_string(callback);
+
+    if (str)
+    {
+        if (str_ptr)
+        {
+            *str_ptr = str->data;
+        }
+
+        if (size_ptr)
+        {
+            *size_ptr = str->size;
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+const char* pbex_get_cstring(pb_callback_t callback)
+{
+    const pbex_string_t* str = pbex_get_string(callback);
+    return str == NULL ? NULL : str->data;
+}
+
 pb_callback_t pbex_alloc_bytes(pbex_allocator_t* allocator, const void* data, size_t count)
 {
     pbex_bytes_t* d = (pbex_bytes_t*)allocator->alloc(allocator, sizeof(pbex_bytes_t) + count);
@@ -737,26 +787,44 @@ const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback)
     }
 }
 
-const pbex_string_t* pbex_get_string(pb_callback_t callback)
+bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr)
 {
-    if (callback.funcs.encode == _encode_string || callback.funcs.encode == _encode_string_static)
+    const pbex_bytes_t* bytes = pbex_get_bytes(callback);
+
+    if (bytes)
     {
-        return (const pbex_string_t*)callback.arg;
+        if (data_ptr)
+        {
+            *data_ptr = bytes->data;
+        }
+
+        if (size_ptr)
+        {
+            *size_ptr = bytes->size;
+        }
+
+        return true;
     }
-    else if (callback.funcs.decode == _decode_string)
-    {
-        return (const pbex_string_t*)callback.arg;
-    }
-    else
-    {
-        return NULL;
-    }
+
+    return false;
 }
 
-const char* pbex_get_cstring(pb_callback_t callback)
+size_t pbex_copy_bytes_to(pb_callback_t callback, void* data, size_t offset, size_t size)
 {
-    const pbex_string_t* str = pbex_get_string(callback);
-    return str == NULL ? NULL : str->data;
+    const pbex_bytes_t* bytes = pbex_get_bytes(callback);
+
+    if (bytes && data && offset < bytes->size)
+    {
+        if (offset + size > bytes->size)
+        {
+            size = bytes->size - offset;
+        }
+
+        memcpy(data, &bytes->data[offset], size);
+        return size;
+    }
+
+    return 0;
 }
 
 //-----------------------------------------------
