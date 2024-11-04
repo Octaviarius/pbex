@@ -10,7 +10,8 @@
 #include <sys/types.h>
 
 #define PBEX_VERSION_MAJOR 1
-#define PBEX_VERSION_MINOR 1
+#define PBEX_VERSION_MINOR 2
+#define PBEX_VERSION_PATCH 0
 
 /**
  * \defgroup mainMacros Main macros
@@ -301,17 +302,6 @@ bool pbex_decode_from_buffer(pbex_allocator_t*   allocator,
 bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* inst);
 
 /**
- * \brief Allocate string for encoding
- *
- * \param allocator
- * \param str
- * \param len
- *
- * \return pb_callback_t
- */
-pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ssize_t len);
-
-/**
  * \brief Allocate list
  *
  * \param allocator
@@ -324,30 +314,40 @@ pb_callback_t pbex_alloc_list(pbex_allocator_t* allocator, size_t item_size);
 /**
  * \brief Encount list nodes
  *
- * \param callback
+ * \param list
  *
  * \return size_t
  */
-size_t pbex_list_count(pb_callback_t callback);
+size_t pbex_list_count(pb_callback_t list);
 
 /**
  * \brief Add new node
  *
- * \param callback
+ * \param list
  *
  * \return Pointer to created node
  */
-void* pbex_list_add_node(pb_callback_t callback);
+void* pbex_list_add_node(pb_callback_t list);
+
+/**
+ * \brief Add new node after
+ *
+ * \param list
+ * \param node
+ *
+ * \return Pointer to created node
+ */
+void* pbex_list_add_node_after(pb_callback_t list, const void* node);
 
 /**
  * \brief Get i-node
  *
- * \param callback
+ * \param list
  * \param idx
  *
  * \return Pointer to returned node. NULL if no node is available
  */
-void* pbex_list_get_node(pb_callback_t callback, size_t idx);
+void* pbex_list_get_node(pb_callback_t list, size_t idx);
 
 /**
  * \brief Get the nest node
@@ -355,6 +355,17 @@ void* pbex_list_get_node(pb_callback_t callback, size_t idx);
  * \return Pointer to returned node. NULL if no node is available
  */
 void* pbex_list_next_node(const void* node);
+
+/**
+ * \brief Allocate string for encoding
+ *
+ * \param allocator
+ * \param str
+ * \param len
+ *
+ * \return pb_callback_t
+ */
+pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ssize_t len);
 
 /**
  * \brief Set string for encoding.
@@ -367,6 +378,15 @@ void* pbex_list_next_node(const void* node);
  * Make sure your structure exists while nano pb is encoding a structure
  */
 pb_callback_t pbex_set_string(const pbex_string_t* str);
+
+/**
+ * \brief Set C-string
+ *
+ * \param str
+ *
+ * \return pb_callback_t
+ */
+pb_callback_t pbex_set_cstring(const char* str);
 
 /**
  * \brief Get string structure
@@ -386,7 +406,7 @@ const pbex_string_t* pbex_get_string(pb_callback_t callback);
  *
  * \return true if it's OK
  */
-bool pbex_get_string_ptr(pb_callback_t callback, const char** str_ptr, size_t* size_ptr);
+bool pbex_get_string_p(pb_callback_t callback, const char** str_ptr, size_t* size_ptr);
 
 /**
  * \brief Get C-string. It gets pbex_string_t and return only pointer to data field
