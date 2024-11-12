@@ -39,6 +39,8 @@ struct pbex_list_node
 static bool _encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 /** Encode string callback when \ref pbex_set_string is used */
 static bool _encode_string_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
+/** Encode C-string callback when \ref pbex_set_cstring is used */
+static bool _encode_cstring_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
 /** Encode string callback when \ref pbex_alloc_bytes is used */
 static bool _encode_bytes(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 /** Encode bytes callback when \ref pbex_set_bytes is used */
@@ -521,7 +523,9 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
 
                     case PB_HTYPE_ONEOF:
                     {
-                        if (*(pb_size_t*)it.pSize == it.tag)
+                        callback = (pb_callback_t*)it.pSize - 1;
+
+                        if (callback->arg != allocator && *(pb_size_t*)it.pSize == it.tag)
                         {
                             pbex_release(allocator, it.submsg_desc, it.pData);
                         }
@@ -533,10 +537,16 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
             }
         }
 
-        if (callback)
+        // Only if arg is not allocator
+        if (callback && callback->arg != allocator)
         {
-            allocator->dealloc(allocator, callback->arg);
-            callback->arg = NULL;
+            if ((void*)&callback->funcs == _decode_bytes || (void*)&callback->funcs == _decode_string
+                || (void*)&callback->funcs == _encode_bytes || (void*)&callback->funcs == _encode_string
+                || (void*)&callback->funcs == _encode_list || (void*)&callback->funcs == _decode_repeated)
+            {
+                allocator->dealloc(allocator, callback->arg);
+                callback->arg = NULL;
+            }
         }
 
     } while (pb_field_iter_next(&it));
