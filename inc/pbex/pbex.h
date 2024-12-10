@@ -6,11 +6,25 @@
 #include "pb_decode.h"
 #include "pb_encode.h"
 
+#include <stdint.h>
 #include <stdlib.h>
-#include <sys/types.h>
+
+#if SIZE_MAX == UINT8_MAX
+typedef int8_t ssize_t;
+#elif SIZE_MAX == UINT16_MAX
+typedef int16_t ssize_t;
+#elif SIZE_MAX == UINT32_MAX
+typedef int32_t ssize_t;
+#elif SIZE_MAX == UINT64_MAX
+typedef int64_t ssize_t;
+#elif SIZE_MAX == UINT128_MAX
+typedef int128_t ssize_t;
+#else
+#error "Can't define ssize_t"
+#endif
 
 #define PBEX_VERSION_MAJOR 1
-#define PBEX_VERSION_MINOR 2
+#define PBEX_VERSION_MINOR 3
 #define PBEX_VERSION_PATCH 0
 
 /**
@@ -48,10 +62,6 @@
  * \def PBEX_ATOMIC_END() PBEX_ATOMIC_BEGIN()
  * Using for sharing instances in several tasks or interrupts. It protects
  * against race conditions.
- *
- * \def PBEX_DL_ALLOCATOR_DOUBLE_LINKED
- * Enables or disables double-linked lists.
- * \note This option a little bit increases RAM by sizeof(void*) for every list node.
  *
  * \def PBEX_EXTERNAL_INCLUDE
  * Includes defined file in pbex.c to provide PBEX_ATOMIC_x macros functionality
@@ -142,10 +152,8 @@ typedef struct
     struct
     {
         void* next; //!< Pointer to next node
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         void* prev; //!< Pointer to previous node
-#endif
-    } head; //!< stores the first node, which hasn't got any data, but node header.
+    } head;         //!< stores the first node, which hasn't got any data, but node header.
 } pbex_dl_allocator_t;
 
 /**

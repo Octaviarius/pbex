@@ -14,10 +14,6 @@
 #define PBEX_ATOMIC_END()
 #endif
 
-#ifndef PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-#define PBEX_DL_ALLOCATOR_DOUBLE_LINKED 0
-#endif
-
 /**
  * \addtogroup Internal
  * \{
@@ -39,8 +35,6 @@ struct pbex_list_node
 static bool _encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 /** Encode string callback when \ref pbex_set_string is used */
 static bool _encode_string_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
-/** Encode C-string callback when \ref pbex_set_cstring is used */
-static bool _encode_cstring_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg)
 /** Encode string callback when \ref pbex_alloc_bytes is used */
 static bool _encode_bytes(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 /** Encode bytes callback when \ref pbex_set_bytes is used */
@@ -523,9 +517,7 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
 
                     case PB_HTYPE_ONEOF:
                     {
-                        callback = (pb_callback_t*)it.pSize - 1;
-
-                        if (callback->arg != allocator && *(pb_size_t*)it.pSize == it.tag)
+                        if (*(pb_size_t*)it.pSize == it.tag)
                         {
                             pbex_release(allocator, it.submsg_desc, it.pData);
                         }
@@ -537,16 +529,10 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
             }
         }
 
-        // Only if arg is not allocator
-        if (callback && callback->arg != allocator)
+        if (callback)
         {
-            if ((void*)&callback->funcs == _decode_bytes || (void*)&callback->funcs == _decode_string
-                || (void*)&callback->funcs == _encode_bytes || (void*)&callback->funcs == _encode_string
-                || (void*)&callback->funcs == _encode_list || (void*)&callback->funcs == _decode_repeated)
-            {
-                allocator->dealloc(allocator, callback->arg);
-                callback->arg = NULL;
-            }
+            allocator->dealloc(allocator, callback->arg);
+            callback->arg = NULL;
         }
 
     } while (pb_field_iter_next(&it));
@@ -955,34 +941,26 @@ typedef struct dl_node dl_node_t;
 struct dl_node
 {
     dl_node_t* next;
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
     dl_node_t* prev;
-#endif
-    uint8_t data[];
+    uint8_t    data[];
 };
 
 static void* _dl_alloc(pbex_allocator_t* self, size_t size)
 {
-    pbex_dl_allocator_t* dl = &CONTAINER_OF(self, pbex_dl_allocator_t, allocator);
-
-    dl_node_t* new_node = (dl_node_t*)malloc(sizeof(dl_node_t) + size);
+    pbex_dl_allocator_t* dl       = &CONTAINER_OF(self, pbex_dl_allocator_t, allocator);
+    dl_node_t*           new_node = (dl_node_t*)malloc(sizeof(dl_node_t) + size);
 
     if (new_node)
     {
         dl_node_t* head = (dl_node_t*)&dl->head;
 
         PBEX_ATOMIC_BEGIN();
-
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         head->next->prev = new_node;
         new_node->next   = head->next;
         head->next       = new_node;
         new_node->prev   = head;
-#else
-        new_node->next = head->next;
-        head->next     = new_node;
-#endif
         PBEX_ATOMIC_END();
+
         return &new_node->data;
     }
 
@@ -995,45 +973,27 @@ static void _dl_dealloc(pbex_allocator_t* self, void* ptr)
 
     if (dl)
     {
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         PBEX_ATOMIC_BEGIN();
 
         dl_node_t* node = &CONTAINER_OF(ptr, dl_node_t, data);
 
+        // already detached
+        if (node->prev == NULL || node->next == NULL)
+        {
+            PBEX_ATOMIC_END();
+            return;
+        }
+
         node->prev->next = node->next;
         node->next->prev = node->prev;
+
+        // mark detached
+        node->next = NULL;
+        node->prev = NULL;
 
         PBEX_ATOMIC_END();
 
         free(node);
-#else
-        PBEX_ATOMIC_BEGIN();
-
-        dl_node_t* prev_node = ((dl_node_t*)&dl->head);
-        dl_node_t* node      = ((dl_node_t*)&dl->head)->next;
-        bool       found     = false;
-
-        while (node != &dl->head)
-        {
-            if (node->data == ptr)
-            {
-                prev_node->next = node->next;
-                found           = true;
-                break;
-            }
-            else
-            {
-                prev_node = node;
-            }
-        }
-
-        PBEX_ATOMIC_END();
-
-        if (found)
-        {
-            free(node);
-        }
-#endif
     }
 }
 
@@ -1063,10 +1023,7 @@ void pbex_create_dl_allocator(pbex_dl_allocator_t* allocator)
     allocator->allocator.alloc   = _dl_alloc;
     allocator->allocator.dealloc = _dl_dealloc;
     allocator->head.next         = &allocator->head;
-
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-    allocator->head.prev = &allocator->head;
-#endif
+    allocator->head.prev         = &allocator->head;
 }
 
 void pbex_delete_dl_allocator(pbex_dl_allocator_t* allocator)
@@ -1076,18 +1033,44 @@ void pbex_delete_dl_allocator(pbex_dl_allocator_t* allocator)
 
 void pbex_dispose_dl_allocator(pbex_dl_allocator_t* allocator)
 {
-    dl_node_t* head = ((dl_node_t*)&allocator->head);
-    dl_node_t* node = head->next;
+    // detach from head
+    PBEX_ATOMIC_BEGIN();
+    dl_node_t fake_head;
 
-    while (node != head)
+    dl_node_t* head = ((dl_node_t*)&allocator->head);
+
+    fake_head.next       = head->next;
+    fake_head.prev       = head->prev;
+    head->next->prev     = &fake_head;
+    head->prev->next     = &fake_head;
+    allocator->head.next = head;
+    allocator->head.prev = head;
+
+    head = &fake_head;
+
+    dl_node_t* next_node;
+
+    for (dl_node_t* node = head->next; node != head; node = next_node)
     {
-        dl_node_t* next_node = node->next;
+        next_node = node->next;
+
+        // already detached
+        if (node->prev == NULL || node->next == NULL)
+        {
+            continue;
+        }
+
+        node->prev->next = node->next;
+        node->next->prev = node->prev;
+
+        // mark detached
+        node->next = NULL;
+        node->prev = NULL;
+
+        PBEX_ATOMIC_END();
         free(node);
-        node = next_node;
+        PBEX_ATOMIC_BEGIN();
     }
 
-    allocator->head.next = head;
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-    allocator->head.prev = head;
-#endif
+    PBEX_ATOMIC_END();
 }

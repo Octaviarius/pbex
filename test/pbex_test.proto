@@ -1,0 +1,33 @@
+syntax = "proto3";
+import "nanopb.proto";
+
+package pbex;
+
+message Test1 {
+    bool boolean = 1;
+    int32 integral = 2;
+}
+
+message Test2 {
+    bool boolean = 1;
+    int32 integral = 2;
+    string string = 3;
+    bytes byteArray = 4;
+}
+
+message Test3 {
+    option (nanopb_msgopt).submsg_callback = true;
+
+    oneof body {
+        Test1 item1 = 1;
+        Test2 item2 = 2;
+    }
+}
+
+message Test4 {
+    repeated Test1 item = 1;
+}
+
+message Test5 {
+    map<string, int32> kv = 1;
+}
