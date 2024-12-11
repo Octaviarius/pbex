@@ -32,3 +32,6 @@
 *.app
 
 /gen
+.cache
+.vscode
+build

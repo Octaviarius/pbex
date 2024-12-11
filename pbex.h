@@ -6,11 +6,11 @@
 #include "pb_decode.h"
 #include "pb_encode.h"
 
+#include <stdint.h>
 #include <stdlib.h>
-#include <sys/types.h>
 
-#define PBEX_VERSION_MAJOR 1
-#define PBEX_VERSION_MINOR 2
+#define PBEX_VERSION_MAJOR 2
+#define PBEX_VERSION_MINOR 0
 #define PBEX_VERSION_PATCH 0
 
 /**
@@ -49,12 +49,14 @@
  * Using for sharing instances in several tasks or interrupts. It protects
  * against race conditions.
  *
- * \def PBEX_DL_ALLOCATOR_DOUBLE_LINKED
- * Enables or disables double-linked lists.
- * \note This option a little bit increases RAM by sizeof(void*) for every list node.
- *
  * \def PBEX_EXTERNAL_INCLUDE
  * Includes defined file in pbex.c to provide PBEX_ATOMIC_x macros functionality
+ *
+ * \def PBEX_MALLOC(size)
+ * malloc function definition
+ *
+ * \def PBEX_FREE(ptr)
+ * free function definition
  *
  * \}
  */
@@ -94,7 +96,7 @@ struct pbex_allocator
  * \note This allocator doesn't store any info about allocated instances, so
  * you must call \ref pbex_release to release allocated data.
  */
-pbex_allocator_t pbex_create_heap_allocator(void);
+pbex_allocator_t pbex_heap_allocator_create(void);
 
 /**
  * \ingroup allocatorsTypes
@@ -123,14 +125,34 @@ typedef struct
  *
  * \return pbex_pool_allocator_t
  */
-pbex_pool_allocator_t pbex_create_pool_allocator(uint8_t* ptr, size_t size);
+pbex_pool_allocator_t pbex_pool_allocator_create(uint8_t* ptr, size_t size);
+
+/**
+ * \ingroup allocatorsApi
+ * \brief Get free memory
+ *
+ * \param allocator
+ *
+ * \return size_t
+ */
+size_t pbex_pool_allocator_remain(pbex_pool_allocator_t* allocator);
+
+/**
+ * \ingroup allocatorsApi
+ * \brief Dispose pool allocator
+ *
+ * \param allocator
+ *
+ * \return size_t
+ */
+void pbex_pool_allocator_dispose(pbex_pool_allocator_t* allocator);
 
 /**
  * \ingroup allocatorsTypes
  * \brief Disposable list allocator
  * It can fully control memory allocation and deallocation.
  * When you allocate some memory instances you can free them via
- * explicit call \ref  pbex_dispose_dl_allocator or \ref pbex_delete_dl_allocator,
+ * explicit call \ref  pbex_dl_allocator_dispose or \ref pbex_dl_allocator_delete,
  * or via \ref pbex_release.
  *
  * \note It uses malloc() and free() functions.
@@ -142,10 +164,8 @@ typedef struct
     struct
     {
         void* next; //!< Pointer to next node
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         void* prev; //!< Pointer to previous node
-#endif
-    } head; //!< stores the first node, which hasn't got any data, but node header.
+    } head;         //!< stores the first node, which hasn't got any data, but node header.
 } pbex_dl_allocator_t;
 
 /**
@@ -154,7 +174,7 @@ typedef struct
  *
  * \param allocator
  */
-void pbex_create_dl_allocator(pbex_dl_allocator_t* allocator);
+void pbex_dl_allocator_create(pbex_dl_allocator_t* allocator);
 
 /**
  * \ingroup allocatorsApi
@@ -162,15 +182,23 @@ void pbex_create_dl_allocator(pbex_dl_allocator_t* allocator);
  *
  * \param allocator
  */
-void pbex_delete_dl_allocator(pbex_dl_allocator_t* allocator);
+void pbex_dl_allocator_delete(pbex_dl_allocator_t* allocator);
 
 /**
  * \ingroup allocatorsApi
- * \brief Dispose the allocator. The same as \ref pbex_delete_dl_allocator
+ * \brief Dispose the allocator. The same as \ref pbex_dl_allocator_delete
  *
  * \param allocator
  */
-void pbex_dispose_dl_allocator(pbex_dl_allocator_t* allocator);
+void pbex_dl_allocator_dispose(pbex_dl_allocator_t* allocator);
+
+/**
+ * \ingroup allocatorsApi
+ * \brief Encount allocated items
+ *
+ * \param allocator
+ */
+size_t pbex_dl_allocator_count(pbex_dl_allocator_t* allocator);
 
 /**
  * \}
@@ -309,7 +337,7 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
  *
  * \return pb_callback_t
  */
-pb_callback_t pbex_alloc_list(pbex_allocator_t* allocator, size_t item_size);
+pb_callback_t pbex_list_alloc(pbex_allocator_t* allocator, size_t item_size);
 
 /**
  * \brief Encount list nodes
@@ -365,7 +393,7 @@ void* pbex_list_next_node(const void* node);
  *
  * \return pb_callback_t
  */
-pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ssize_t len);
+pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, size_t len);
 
 /**
  * \brief Set string for encoding.
@@ -377,7 +405,7 @@ pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ss
  * \note It doesn't allocate memory, just set encoder function and pointer to your structure.
  * Make sure your structure exists while nano pb is encoding a structure
  */
-pb_callback_t pbex_set_string(const pbex_string_t* str);
+pb_callback_t pbex_string_set(const pbex_string_t* str);
 
 /**
  * \brief Set C-string
@@ -386,7 +414,7 @@ pb_callback_t pbex_set_string(const pbex_string_t* str);
  *
  * \return pb_callback_t
  */
-pb_callback_t pbex_set_cstring(const char* str);
+pb_callback_t pbex_cstring_set(const char* str);
 
 /**
  * \brief Get string structure
@@ -395,7 +423,7 @@ pb_callback_t pbex_set_cstring(const char* str);
  *
  * \return const pbex_string_t*
  */
-const pbex_string_t* pbex_get_string(pb_callback_t callback);
+const pbex_string_t* pbex_string_get(pb_callback_t callback);
 
 /**
  * \brief Get string data directly to variables. It's a syntax sugar.
@@ -406,7 +434,7 @@ const pbex_string_t* pbex_get_string(pb_callback_t callback);
  *
  * \return true if it's OK
  */
-bool pbex_get_string_p(pb_callback_t callback, const char** str_ptr, size_t* size_ptr);
+bool pbex_string_get_p(pb_callback_t callback, const char** str_ptr, size_t* size_ptr);
 
 /**
  * \brief Get C-string. It gets pbex_string_t and return only pointer to data field
@@ -415,7 +443,7 @@ bool pbex_get_string_p(pb_callback_t callback, const char** str_ptr, size_t* siz
  *
  * \return const char*
  */
-const char* pbex_get_cstring(pb_callback_t callback);
+const char* pbex_cstring_get(pb_callback_t callback);
 
 /**
  * \brief Allocate bytes for encoding
@@ -429,7 +457,7 @@ const char* pbex_get_cstring(pb_callback_t callback);
  * \note It doesn't allocate memory, just set encoder function and pointer to your structure.
  * Make sure your structure exists while nano pb is encoding a structure
  */
-pb_callback_t pbex_alloc_bytes(pbex_allocator_t* allocator, const void* data, size_t count);
+pb_callback_t pbex_bytes_alloc(pbex_allocator_t* allocator, const void* data, size_t count);
 
 /**
  * \brief Set bytes for encoding
@@ -438,7 +466,7 @@ pb_callback_t pbex_alloc_bytes(pbex_allocator_t* allocator, const void* data, si
  *
  * \return pb_callback_t
  */
-pb_callback_t pbex_set_bytes(const pbex_bytes_t* bytes);
+pb_callback_t pbex_bytes_set(const pbex_bytes_t* bytes);
 
 /**
  * \brief Get bytes structure
@@ -447,7 +475,7 @@ pb_callback_t pbex_set_bytes(const pbex_bytes_t* bytes);
  *
  * \return const pbex_bytes_t*
  */
-const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback);
+const pbex_bytes_t* pbex_bytes_get(pb_callback_t callback);
 
 /**
  * \brief Get bytes data directly to variables. It's a syntax sugar.
@@ -458,7 +486,7 @@ const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback);
  *
  * \return true if it's OK
  */
-bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr);
+bool pbex_bytes_get_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr);
 
 /**
  * \brief Copy bytes directly to variable. It's a syntax sugar.
@@ -470,7 +498,7 @@ bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* siz
  *
  * \return size_t
  */
-size_t pbex_copy_bytes_to(pb_callback_t callback, void* data, size_t offset, size_t size);
+size_t pbex_bytes_copy_to(pb_callback_t callback, void* data, size_t offset, size_t size);
 
 /**
  * \}

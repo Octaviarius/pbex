@@ -14,8 +14,12 @@
 #define PBEX_ATOMIC_END()
 #endif
 
-#ifndef PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-#define PBEX_DL_ALLOCATOR_DOUBLE_LINKED 0
+#ifndef PBEX_MALLOC
+#define PBEX_MALLOC(size) malloc(size)
+#endif
+
+#ifndef PBEX_FREE
+#define PBEX_FREE(ptr) free(ptr)
 #endif
 
 /**
@@ -35,15 +39,15 @@ struct pbex_list_node
     uint8_t           data[]; //!< Payload
 };
 
-/** Encode string callback when \ref pbex_alloc_string is used */
+/** Encode string callback when \ref pbex_string_alloc is used */
 static bool _encode_string(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
-/** Encode string callback when \ref pbex_set_string is used */
+/** Encode string callback when \ref pbex_string_set is used */
 static bool _encode_string_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
-/** Encode string callback when \ref pbex_alloc_bytes is used */
+/** Encode string callback when \ref pbex_bytes_alloc is used */
 static bool _encode_bytes(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
-/** Encode bytes callback when \ref pbex_set_bytes is used */
+/** Encode bytes callback when \ref pbex_bytes_set is used */
 static bool _encode_bytes_static(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
-/** Encode list callback when \ref pbex_alloc_list is used */
+/** Encode list callback when \ref pbex_list_alloc is used */
 static bool _encode_list(pb_ostream_t* stream, const pb_field_t* field, void* const* arg);
 
 /** Decode string callback */
@@ -59,6 +63,10 @@ static bool _decode_repeated(pb_istream_t* stream, const pb_field_t* field, void
 static size_t _prepare_size_of_struct(const pb_msgdesc_t* descr);
 /** Makes preparations before run decode */
 static bool _prepare_decode(pbex_allocator_t* allocator, pb_istream_t* stream, const pb_msgdesc_t* descr, void* inst);
+/** Count list items */
+static size_t _list_count(const pbex_list_t* list);
+/** Count list items */
+static void _list_add_node(pbex_list_t* list, pbex_list_node_t* node);
 
 /**
  * \}
@@ -123,29 +131,112 @@ static bool _encode_list(pb_ostream_t* stream, const pb_field_t* field, void* co
 {
     const pbex_list_t* d = (const pbex_list_t*)(*arg);
 
+    bool ret = true;
+
     if (d)
     {
-        pbex_list_node_t* node = d->head;
+        pbex_list_node_t* node;
 
-        while (node)
+        uint16_t ltype = PB_LTYPE(field->type);
+        uint16_t atype = PB_ATYPE(field->type);
+        uint16_t htype = PB_HTYPE(field->type);
+
+        if (PB_LTYPE(field->type) <= PB_LTYPE_LAST_PACKABLE)
         {
-            if (!pb_encode_tag_for_field(stream, field))
+            size_t       size = 0;
+            pb_ostream_t substream;
+
+            // calc size of elements
+            switch (PB_LTYPE(field->type))
             {
-                return false;
+                case PB_LTYPE_VARINT:
+                case PB_LTYPE_UVARINT:
+                {
+                    substream = (pb_ostream_t)PB_OSTREAM_SIZING;
+                    for (node = d->head; node != NULL; node = node->next)
+                    {
+                        pb_encode_varint(&substream, *(const uint64_t*)node->data);
+                    }
+                    size = substream.bytes_written;
+                    break;
+                }
+
+                case PB_LTYPE_SVARINT:
+                {
+                    substream = (pb_ostream_t)PB_OSTREAM_SIZING;
+                    for (node = d->head; node != NULL; node = node->next)
+                    {
+                        pb_encode_svarint(&substream, *(const int64_t*)node->data);
+                    }
+                    size = substream.bytes_written;
+                    break;
+                }
+
+                case PB_LTYPE_BOOL:
+                {
+                    size = _list_count(d) * 1;
+                    break;
+                }
+
+                case PB_LTYPE_FIXED32:
+                {
+                    size = _list_count(d) * 4;
+                    break;
+                }
+
+                case PB_LTYPE_FIXED64:
+                {
+                    size = _list_count(d) * 8;
+                    break;
+                }
             }
 
-            if (!pb_encode_submessage(stream, field->submsg_desc, node->data))
-            {
-                return false;
-            }
+            ret = pb_encode_tag(stream, PB_WT_STRING, field->tag);
+            ret = ret && pb_encode_varint(stream, size);
 
-            node = node->next;
+            for (node = d->head; ret && node != NULL; node = node->next)
+            {
+                switch (PB_LTYPE(field->type))
+                {
+                    case PB_LTYPE_BOOL:
+                        ret = pb_encode_varint(stream, *(const uint64_t*)node->data == 1);
+                        break;
+                    case PB_LTYPE_VARINT:
+                    case PB_LTYPE_UVARINT:
+                        ret = pb_encode_varint(stream, *(const uint64_t*)node->data);
+                        break;
+                    case PB_LTYPE_SVARINT:
+                        ret = pb_encode_svarint(stream, *(const int64_t*)node->data);
+                        break;
+                    case PB_LTYPE_FIXED32:
+                        ret = pb_encode_fixed32(stream, (const void*)node->data);
+                        break;
+                    case PB_LTYPE_FIXED64:
+                        ret = pb_encode_fixed64(stream, (const void*)node->data);
+                        break;
+                }
+            }
         }
+        else
+        {
+            for (node = d->head; ret && node != NULL; node = node->next)
+            {
+                ret = pb_encode_tag_for_field(stream, field);
 
-        return true;
+                if (PB_LTYPE_IS_SUBMSG(field->type))
+                {
+                    ret = ret && pb_encode_submessage(stream, field->submsg_desc, node->data);
+                }
+                else
+                {
+                    const pbex_string_t* str = pbex_string_get(*(pb_callback_t*)node->data);
+                    ret                      = ret && pb_encode_string(stream, (pb_byte_t*)str->data, str->size - 1);
+                }
+            }
+        }
     }
 
-    return false;
+    return ret;
 }
 
 //-----------------------------------------------
@@ -227,38 +318,97 @@ static bool _decode_oneof(pb_istream_t* stream, const pb_field_t* field, void** 
 
 static bool _decode_repeated(pb_istream_t* stream, const pb_field_t* field, void** arg)
 {
+    bool ret = false;
+
     pbex_list_t* list = (pbex_list_t*)(*arg);
 
     if (list)
     {
-        pbex_list_node_t* node = list->allocator->alloc(list->allocator, sizeof(pbex_list_node_t) + list->item_size);
+        pbex_list_node_t* node;
+        pb_callback_t*    callback;
+
+        node = list->allocator->alloc(list->allocator, sizeof(pbex_list_node_t) + list->item_size);
 
         if (node)
         {
-            node->next = NULL;
-            if (!list->tail)
-            {
-                list->tail = list->head = node;
-            }
-            else
-            {
-                list->tail->next = node;
-                list->tail       = node;
-            }
+            _list_add_node(list, node);
 
-            if (field->submsg_desc->default_value)
+            switch (PB_LTYPE(field->type))
             {
-                memcpy(&node->data, field->submsg_desc->default_value, list->item_size);
-            }
+                case PB_LTYPE_BOOL:
+                {
+                    ret = pb_decode_bool(stream, (bool*)node->data);
+                    break;
+                }
 
-            if (_prepare_decode(list->allocator, stream, field->submsg_desc, &node->data))
-            {
-                return pb_decode(stream, field->submsg_desc, &node->data);
+                case PB_LTYPE_VARINT:
+                case PB_LTYPE_UVARINT:
+                {
+                    ret = pb_decode_varint(stream, (uint64_t*)node->data);
+                    break;
+                }
+
+                case PB_LTYPE_SVARINT:
+                {
+                    ret = pb_decode_svarint(stream, (int64_t*)node->data);
+                    break;
+                }
+
+                case PB_LTYPE_FIXED64:
+                {
+                    ret = pb_decode_fixed64(stream, node->data);
+                    break;
+                }
+
+                case PB_LTYPE_FIXED32:
+                {
+                    ret = pb_decode_fixed32(stream, node->data);
+                    break;
+                }
+
+                case PB_LTYPE_BYTES:
+                {
+                    callback            = (pb_callback_t*)node->data;
+                    pbex_bytes_t* bytes = (pbex_bytes_t*)list->allocator->alloc(list->allocator,
+                                                                                stream->bytes_left
+                                                                                    + sizeof(pbex_bytes_t));
+
+                    bytes->size = stream->bytes_left;
+                    pb_read(stream, bytes->data, stream->bytes_left);
+                    callback->arg          = bytes;
+                    callback->funcs.decode = _decode_bytes;
+                    ret                    = true;
+                    break;
+                }
+
+                case PB_LTYPE_STRING:
+                {
+                    callback           = (pb_callback_t*)node->data;
+                    pbex_string_t* str = (pbex_string_t*)list->allocator->alloc(list->allocator,
+                                                                                stream->bytes_left + 1
+                                                                                    + sizeof(pbex_string_t));
+
+                    str->size = stream->bytes_left + 1;
+                    pb_read(stream, (uint8_t*)str->data, stream->bytes_left);
+                    str->data[str->size - 1] = '\0';
+                    callback->arg            = str;
+                    callback->funcs.decode   = _decode_string;
+                    ret                      = true;
+                    break;
+                }
+
+                case PB_LTYPE_SUBMESSAGE:
+                case PB_LTYPE_SUBMSG_W_CB:
+                {
+                    ret = _prepare_decode(list->allocator, stream, field->submsg_desc, &node->data);
+                    ret = ret && pb_decode(stream, field->submsg_desc, &node->data);
+                    break;
+                }
             }
         }
     }
 
-    return false;
+    return ret;
 }
 
 #define MSG_PTR ((uint8_t*)sizeof(void*))
@@ -285,6 +435,8 @@ static size_t _prepare_size_of_struct(const pb_msgdesc_t* descr)
 
 static bool _prepare_decode(pbex_allocator_t* allocator, pb_istream_t* stream, const pb_msgdesc_t* descr, void* inst)
 {
+    bool ret = true;
+
     pb_field_iter_t it;
     pb_field_iter_begin(&it, descr, inst);
 
@@ -292,65 +444,149 @@ static bool _prepare_decode(pbex_allocator_t* allocator, pb_istream_t* stream, c
     {
         pb_callback_t* callback;
 
-        switch (PB_LTYPE(it.type))
+        switch (PB_HTYPE(it.type))
         {
-            case PB_LTYPE_STRING:
-                callback               = (pb_callback_t*)it.pData;
-                callback->funcs.decode = &_decode_string;
-                callback->arg          = allocator;
-                break;
-
-            case PB_LTYPE_BYTES:
-                callback               = (pb_callback_t*)it.pData;
-                callback->funcs.decode = &_decode_bytes;
-                callback->arg          = allocator;
-                break;
-
-            case PB_LTYPE_SUBMESSAGE:
-                if (PB_HTYPE(it.type) == PB_HTYPE_REPEATED && PB_ATYPE(it.type) == PB_ATYPE_CALLBACK)
+            case PB_HTYPE_REQUIRED:
+            case PB_HTYPE_SINGULAR:
+            {
+                switch (PB_LTYPE(it.type))
                 {
-                    pbex_list_t* list = (pbex_list_t*)allocator->alloc(allocator, sizeof(pbex_list_t));
-
-                    if (!list)
+                    case PB_LTYPE_STRING:
                     {
-                        return false;
+                        callback               = (pb_callback_t*)it.pData;
+                        callback->funcs.decode = &_decode_string;
+                        callback->arg          = allocator;
+                        break;
                     }
 
-                    list->allocator = allocator;
-                    list->item_size = _prepare_size_of_struct(it.submsg_desc);
-
-                    list->head = NULL;
-                    list->tail = NULL;
-
-                    callback               = (pb_callback_t*)it.pData;
-                    callback->funcs.decode = &_decode_repeated;
-                    callback->arg          = list;
-
-                    break;
-                }
-                else
-                {
-                    _prepare_decode(allocator, stream, it.submsg_desc, it.pData);
-                }
-                break;
-
-            case PB_LTYPE_SUBMSG_W_CB:
-                switch (PB_HTYPE(it.type))
-                {
-                    case PB_HTYPE_ONEOF:
+                    case PB_LTYPE_BYTES:
                     {
-                        callback               = (pb_callback_t*)it.pSize - 1;
-                        callback->funcs.decode = &_decode_oneof;
+                        callback               = (pb_callback_t*)it.pData;
+                        callback->funcs.decode = &_decode_bytes;
                         callback->arg          = allocator;
+                        break;
+                    }
+
+                    case PB_LTYPE_SUBMESSAGE:
+                    {
+                        ret = _prepare_decode(allocator, stream, it.submsg_desc, it.pData);
                         break;
                     }
                 }
                 break;
+            }
+
+            case PB_HTYPE_REPEATED:
+            {
+                callback = (pb_callback_t*)it.pData;
+
+                if (!callback->arg)
+                {
+                    pbex_list_t* list = (pbex_list_t*)allocator->alloc(allocator, sizeof(pbex_list_t));
+                    list->allocator   = allocator;
+
+                    list->head = NULL;
+                    list->tail = NULL;
+
+                    callback->funcs.decode = &_decode_repeated;
+                    callback->arg          = list;
+
+                    if (!list)
+                    {
+                        ret = false;
+                    }
+                    else
+                    {
+                        switch (PB_LTYPE(it.type))
+                        {
+                            case PB_LTYPE_BOOL:
+                            {
+                                list->item_size = 1;
+                                break;
+                            }
+
+                            case PB_LTYPE_VARINT:
+                            case PB_LTYPE_UVARINT:
+                            case PB_LTYPE_SVARINT:
+                            case PB_LTYPE_FIXED64:
+                            {
+                                list->item_size = 8;
+                                break;
+                            }
+
+                            case PB_LTYPE_FIXED32:
+                            {
+                                list->item_size = 4;
+                                break;
+                            }
+
+                            case PB_LTYPE_BYTES:
+                            case PB_LTYPE_STRING:
+                            {
+                                list->item_size = sizeof(pb_callback_t);
+                                break;
+                            }
+
+                            case PB_LTYPE_SUBMSG_W_CB:
+                            case PB_LTYPE_SUBMESSAGE:
+                            {
+                                list->item_size = _prepare_size_of_struct(it.submsg_desc);
+
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            case PB_HTYPE_ONEOF:
+            {
+                switch (PB_LTYPE(it.type))
+                {
+                    case PB_LTYPE_SUBMSG_W_CB:
+                    case PB_LTYPE_SUBMESSAGE:
+                        callback = (pb_callback_t*)it.pSize - 1;
+                        if (!callback->arg)
+                        {
+                            callback->funcs.decode = &_decode_oneof;
+                            callback->arg          = allocator;
+                        }
+                        break;
+                }
+                break;
+            }
         }
 
-    } while (pb_field_iter_next(&it));
+    } while (ret && pb_field_iter_next(&it));
 
-    return true;
+    return ret;
+}
+
+static size_t _list_count(const pbex_list_t* list)
+{
+    size_t count = 0;
+    for (pbex_list_node_t* node = list->head; node != NULL; node = node->next)
+    {
+        count++;
+    }
+    return count;
+}
+
+static void _list_add_node(pbex_list_t* list, pbex_list_node_t* node)
+{
+    node->next = NULL;
+
+    if (!list->tail)
+    {
+        list->tail = list->head = node;
+    }
+    else
+    {
+        list->tail->next = node;
+        list->tail       = node;
+    }
 }
 
 //-----------------------------------------------
@@ -365,12 +601,7 @@ static bool _ostream_cb_stub(pb_ostream_t* stream, const pb_byte_t* buf, size_t 
 
 pb_ostream_t pbex_create_ostream_stub(void)
 {
-    pb_ostream_t stream = {0};
-
-    stream.callback = _ostream_cb_stub;
-    stream.max_size = SIZE_MAX;
-
-    return stream;
+    return (pb_ostream_t)PB_OSTREAM_SIZING;
 }
 
 //-----------------------------------------------
@@ -427,7 +658,7 @@ bool pbex_encode_to_dynbuffer(const pb_msgdesc_t* descr, const void* inst, void*
     {
         *size = stream.bytes_written;
 
-        void* ptr = malloc(*size);
+        void* ptr = PBEX_MALLOC(*size);
 
         if (!ptr)
         {
@@ -441,7 +672,7 @@ bool pbex_encode_to_dynbuffer(const pb_msgdesc_t* descr, const void* inst, void*
 
             if (!ret)
             {
-                free(ptr);
+                PBEX_FREE(ptr);
             }
         }
     }
@@ -476,64 +707,83 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
     do
     {
         pb_callback_t* callback = NULL;
+        uint16_t       ltype    = PB_LTYPE(it.type);
+        uint16_t       atype    = PB_ATYPE(it.type);
+        uint16_t       htype    = PB_HTYPE(it.type);
 
-        switch (PB_LTYPE(it.type))
+        switch (PB_HTYPE(it.type))
         {
-            case PB_LTYPE_STRING:
-            case PB_LTYPE_BYTES:
+            case PB_HTYPE_REQUIRED:
+            case PB_HTYPE_SINGULAR:
             {
-                callback = (pb_callback_t*)it.pData;
+                switch (PB_LTYPE(it.type))
+                {
+                    case PB_LTYPE_STRING:
+                    case PB_LTYPE_BYTES:
+                    {
+                        callback = (pb_callback_t*)it.pData;
+                        break;
+                    }
+                }
                 break;
             }
 
-            case PB_LTYPE_SUBMESSAGE:
-                pbex_release(allocator, it.submsg_desc, it.pData);
-                break;
-
-            case PB_LTYPE_SUBMSG_W_CB:
+            case PB_HTYPE_REPEATED:
             {
-                switch (PB_HTYPE(it.type))
+                callback = (pb_callback_t*)it.pData;
+
+                if (callback)
                 {
-                    // WARNING: this is not tested
-                    case PB_HTYPE_REPEATED:
+                    pbex_list_t* list = (pbex_list_t*)callback->arg;
+
+                    if (list)
                     {
-                        callback = (pb_callback_t*)it.pData;
+                        pbex_list_node_t* node = list->head;
 
-                        if (callback)
+                        while (node)
                         {
-                            pbex_list_t* list = (pbex_list_t*)callback->arg;
-
-                            if (list)
+                            switch (PB_LTYPE(it.type))
                             {
-                                pbex_list_node_t* node = list->head;
+                                case PB_LTYPE_BYTES:
+                                case PB_LTYPE_STRING:
+                                {
+                                    pb_callback_t* sub_callback = (pb_callback_t*)node->data;
+                                    list->allocator->dealloc(list->allocator, sub_callback->arg);
+                                    break;
+                                }
 
-                                while (node)
+                                case PB_LTYPE_SUBMSG_W_CB:
+                                case PB_LTYPE_SUBMESSAGE:
                                 {
                                     pbex_release(list->allocator, it.submsg_desc, &node->data);
-                                    list->allocator->dealloc(list->allocator, node);
-                                    node = node->next;
+                                    break;
                                 }
                             }
-                        }
 
-                        break;
-                    }
-
-                    case PB_HTYPE_ONEOF:
-                    {
-                        if (*(pb_size_t*)it.pSize == it.tag)
-                        {
-                            pbex_release(allocator, it.submsg_desc, it.pData);
+                            pbex_list_node_t* prev_node = node;
+                            node                        = node->next;
+                            list->allocator->dealloc(list->allocator, prev_node);
                         }
-                        break;
                     }
                 }
 
                 break;
             }
+
+            case PB_HTYPE_ONEOF:
+            {
+                if (*(pb_size_t*)it.pSize == it.tag)
+                {
+                    callback      = (pb_callback_t*)it.pSize - 1;
+                    callback->arg = NULL;
+                    callback      = NULL;
+                    pbex_release(allocator, it.submsg_desc, it.pData);
+                }
+                break;
+            }
         }
 
-        if (callback)
+        if (callback && callback->arg && callback->arg != allocator)
         {
             allocator->dealloc(allocator, callback->arg);
             callback->arg = NULL;
@@ -544,7 +794,7 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
     return true;
 }
 
-pb_callback_t pbex_alloc_list(pbex_allocator_t* allocator, size_t item_size)
+pb_callback_t pbex_list_alloc(pbex_allocator_t* allocator, size_t item_size)
 {
     pbex_list_t* list = allocator->alloc(allocator, sizeof(pbex_list_t));
 
@@ -571,18 +821,18 @@ pb_callback_t pbex_alloc_list(pbex_allocator_t* allocator, size_t item_size)
 
 size_t pbex_list_count(pb_callback_t list)
 {
-    size_t count = 0;
-
-    pbex_list_t* l = (pbex_list_t*)list.arg;
+    size_t count;
 
     PBEX_ATOMIC_BEGIN();
+    pbex_list_t* l = (pbex_list_t*)list.arg;
 
-    pbex_list_node_t* node = l->head;
-
-    while (node)
+    if (l)
     {
-        node = node->next;
-        count++;
+        count = _list_count(l);
+    }
+    else
+    {
+        count = 0;
     }
 
     PBEX_ATOMIC_END();
@@ -692,9 +942,9 @@ void* pbex_list_next_node(const void* node)
     return ret;
 }
 
-pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ssize_t len)
+pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, size_t len)
 {
-    if (len < 0)
+    if (len == 0)
     {
         if (str)
         {
@@ -733,7 +983,7 @@ pb_callback_t pbex_alloc_string(pbex_allocator_t* allocator, const char* str, ss
     }
 }
 
-pb_callback_t pbex_set_string(const pbex_string_t* str)
+pb_callback_t pbex_string_set(const pbex_string_t* str)
 {
     return (pb_callback_t) {
         .funcs = {.encode = _encode_string_static},
@@ -741,7 +991,7 @@ pb_callback_t pbex_set_string(const pbex_string_t* str)
     };
 }
 
-pb_callback_t pbex_set_cstring(const char* str)
+pb_callback_t pbex_cstring_set(const char* str)
 {
     return (pb_callback_t) {
         .funcs = {.encode = _encode_cstring_static},
@@ -749,7 +999,7 @@ pb_callback_t pbex_set_cstring(const char* str)
     };
 }
 
-const pbex_string_t* pbex_get_string(pb_callback_t callback)
+const pbex_string_t* pbex_string_get(pb_callback_t callback)
 {
     if (callback.funcs.encode == _encode_string || callback.funcs.encode == _encode_string_static)
     {
@@ -765,9 +1015,9 @@ const pbex_string_t* pbex_get_string(pb_callback_t callback)
     }
 }
 
-bool pbex_get_string_p(pb_callback_t callback, const char** str_ptr, size_t* size_ptr)
+bool pbex_string_get_p(pb_callback_t callback, const char** str_ptr, size_t* size_ptr)
 {
-    const pbex_string_t* str = pbex_get_string(callback);
+    const pbex_string_t* str = pbex_string_get(callback);
 
     if (str)
     {
@@ -787,9 +1037,9 @@ bool pbex_get_string_p(pb_callback_t callback, const char** str_ptr, size_t* siz
     return false;
 }
 
-const char* pbex_get_cstring(pb_callback_t callback)
+const char* pbex_cstring_get(pb_callback_t callback)
 {
-    const pbex_string_t* str = pbex_get_string(callback);
+    const pbex_string_t* str = pbex_string_get(callback);
 
     if (str)
     {
@@ -806,7 +1056,7 @@ const char* pbex_get_cstring(pb_callback_t callback)
     return NULL;
 }
 
-pb_callback_t pbex_alloc_bytes(pbex_allocator_t* allocator, const void* data, size_t count)
+pb_callback_t pbex_bytes_alloc(pbex_allocator_t* allocator, const void* data, size_t count)
 {
     pbex_bytes_t* d = (pbex_bytes_t*)allocator->alloc(allocator, sizeof(pbex_bytes_t) + count);
 
@@ -830,7 +1080,7 @@ pb_callback_t pbex_alloc_bytes(pbex_allocator_t* allocator, const void* data, si
     }
 }
 
-pb_callback_t pbex_set_bytes(const pbex_bytes_t* bytes)
+pb_callback_t pbex_bytes_set(const pbex_bytes_t* bytes)
 {
     return (pb_callback_t) {
         .funcs = {.encode = _encode_bytes_static},
@@ -838,7 +1088,7 @@ pb_callback_t pbex_set_bytes(const pbex_bytes_t* bytes)
     };
 }
 
-const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback)
+const pbex_bytes_t* pbex_bytes_get(pb_callback_t callback)
 {
     if (callback.funcs.encode == _encode_bytes || callback.funcs.encode == _encode_bytes_static)
     {
@@ -854,9 +1104,9 @@ const pbex_bytes_t* pbex_get_bytes(pb_callback_t callback)
     }
 }
 
-bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr)
+bool pbex_bytes_get_p(pb_callback_t callback, const void** data_ptr, size_t* size_ptr)
 {
-    const pbex_bytes_t* bytes = pbex_get_bytes(callback);
+    const pbex_bytes_t* bytes = pbex_bytes_get(callback);
 
     if (bytes)
     {
@@ -876,9 +1126,9 @@ bool pbex_get_bytes_p(pb_callback_t callback, const void** data_ptr, size_t* siz
     return false;
 }
 
-size_t pbex_copy_bytes_to(pb_callback_t callback, void* data, size_t offset, size_t size)
+size_t pbex_bytes_copy_to(pb_callback_t callback, void* data, size_t offset, size_t size)
 {
-    const pbex_bytes_t* bytes = pbex_get_bytes(callback);
+    const pbex_bytes_t* bytes = pbex_bytes_get(callback);
 
     if (bytes && data && offset < bytes->size)
     {
@@ -899,13 +1149,13 @@ size_t pbex_copy_bytes_to(pb_callback_t callback, void* data, size_t offset, siz
 static void* _heap_alloc(pbex_allocator_t* self, size_t size)
 {
     (void)self;
-    return malloc(size);
+    return PBEX_MALLOC(size);
 }
 
 static void _heap_dealloc(pbex_allocator_t* self, void* ptr)
 {
     (void)self;
-    free(ptr);
+    PBEX_FREE(ptr);
 }
 
 static void* _pool_alloc(pbex_allocator_t* self, size_t size)
@@ -945,34 +1195,26 @@ typedef struct dl_node dl_node_t;
 struct dl_node
 {
     dl_node_t* next;
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
     dl_node_t* prev;
-#endif
-    uint8_t data[];
+    uint8_t    data[];
 };
 
 static void* _dl_alloc(pbex_allocator_t* self, size_t size)
 {
-    pbex_dl_allocator_t* dl = &CONTAINER_OF(self, pbex_dl_allocator_t, allocator);
-
-    dl_node_t* new_node = (dl_node_t*)malloc(sizeof(dl_node_t) + size);
+    pbex_dl_allocator_t* dl       = &CONTAINER_OF(self, pbex_dl_allocator_t, allocator);
+    dl_node_t*           new_node = (dl_node_t*)PBEX_MALLOC(sizeof(dl_node_t) + size);
 
     if (new_node)
     {
         dl_node_t* head = (dl_node_t*)&dl->head;
 
         PBEX_ATOMIC_BEGIN();
-
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         head->next->prev = new_node;
         new_node->next   = head->next;
         head->next       = new_node;
         new_node->prev   = head;
-#else
-        new_node->next = head->next;
-        head->next     = new_node;
-#endif
         PBEX_ATOMIC_END();
+
         return &new_node->data;
     }
 
@@ -985,49 +1227,31 @@ static void _dl_dealloc(pbex_allocator_t* self, void* ptr)
 
     if (dl)
     {
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
         PBEX_ATOMIC_BEGIN();
 
         dl_node_t* node = &CONTAINER_OF(ptr, dl_node_t, data);
 
+        // already detached
+        if (node->prev == NULL || node->next == NULL)
+        {
+            PBEX_ATOMIC_END();
+            return;
+        }
+
         node->prev->next = node->next;
         node->next->prev = node->prev;
 
-        PBEX_ATOMIC_END();
-
-        free(node);
-#else
-        PBEX_ATOMIC_BEGIN();
-
-        dl_node_t* prev_node = ((dl_node_t*)&dl->head);
-        dl_node_t* node      = ((dl_node_t*)&dl->head)->next;
-        bool       found     = false;
-
-        while (node != &dl->head)
-        {
-            if (node->data == ptr)
-            {
-                prev_node->next = node->next;
-                found           = true;
-                break;
-            }
-            else
-            {
-                prev_node = node;
-            }
-        }
+        // mark detached
+        node->next = NULL;
+        node->prev = NULL;
 
         PBEX_ATOMIC_END();
 
-        if (found)
-        {
-            free(node);
-        }
-#endif
+        PBEX_FREE(node);
     }
 }
 
-pbex_allocator_t pbex_create_heap_allocator(void)
+pbex_allocator_t pbex_heap_allocator_create(void)
 {
     return (pbex_allocator_t) {
         .alloc   = _heap_alloc,
@@ -1035,7 +1259,7 @@ pbex_allocator_t pbex_create_heap_allocator(void)
     };
 }
 
-pbex_pool_allocator_t pbex_create_pool_allocator(uint8_t* ptr, size_t size)
+pbex_pool_allocator_t pbex_pool_allocator_create(uint8_t* ptr, size_t size)
 {
     uint8_t* new_ptr = (uint8_t*)ALIGN((uintptr_t)ptr, sizeof(void*));
 
@@ -1048,36 +1272,83 @@ pbex_pool_allocator_t pbex_create_pool_allocator(uint8_t* ptr, size_t size)
     };
 }
 
-void pbex_create_dl_allocator(pbex_dl_allocator_t* allocator)
+size_t pbex_pool_allocator_remain(pbex_pool_allocator_t* allocator)
+{
+    return allocator->size - allocator->pos;
+}
+
+void pbex_pool_allocator_dispose(pbex_pool_allocator_t* allocator)
+{
+    allocator->pos = 0;
+}
+
+void pbex_dl_allocator_create(pbex_dl_allocator_t* allocator)
 {
     allocator->allocator.alloc   = _dl_alloc;
     allocator->allocator.dealloc = _dl_dealloc;
     allocator->head.next         = &allocator->head;
-
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-    allocator->head.prev = &allocator->head;
-#endif
+    allocator->head.prev         = &allocator->head;
 }
 
-void pbex_delete_dl_allocator(pbex_dl_allocator_t* allocator)
+void pbex_dl_allocator_delete(pbex_dl_allocator_t* allocator)
 {
-    pbex_dispose_dl_allocator(allocator);
+    pbex_dl_allocator_dispose(allocator);
 }
 
-void pbex_dispose_dl_allocator(pbex_dl_allocator_t* allocator)
+void pbex_dl_allocator_dispose(pbex_dl_allocator_t* allocator)
 {
+    // detach from head
+    PBEX_ATOMIC_BEGIN();
+    dl_node_t fake_head;
+
     dl_node_t* head = ((dl_node_t*)&allocator->head);
-    dl_node_t* node = head->next;
 
-    while (node != head)
+    fake_head.next       = head->next;
+    fake_head.prev       = head->prev;
+    head->next->prev     = &fake_head;
+    head->prev->next     = &fake_head;
+    allocator->head.next = head;
+    allocator->head.prev = head;
+
+    head = &fake_head;
+
+    dl_node_t* next_node;
+
+    for (dl_node_t* node = head->next; node != head; node = next_node)
     {
-        dl_node_t* next_node = node->next;
-        free(node);
-        node = next_node;
+        next_node = node->next;
+
+        // already detached
+        if (node->prev == NULL || node->next == NULL)
+        {
+            continue;
+        }
+
+        node->prev->next = node->next;
+        node->next->prev = node->prev;
+
+        // mark detached
+        node->next = NULL;
+        node->prev = NULL;
+
+        PBEX_ATOMIC_END();
+        PBEX_FREE(node);
+        PBEX_ATOMIC_BEGIN();
     }
 
-    allocator->head.next = head;
-#if PBEX_DL_ALLOCATOR_DOUBLE_LINKED
-    allocator->head.prev = head;
-#endif
+    PBEX_ATOMIC_END();
+}
+
+size_t pbex_dl_allocator_count(pbex_dl_allocator_t* allocator)
+{
+    size_t count = 0;
+
+    PBEX_ATOMIC_BEGIN();
+    for (dl_node_t* node = (dl_node_t*)allocator->head.next; node != (dl_node_t*)&allocator->head; node = node->next)
+    {
+        count++;
+    }
+    PBEX_ATOMIC_END();
+
+    return count;
 }
