@@ -35,3 +35,12 @@ message Test5 {
 message Test6 {
     repeated int32 integrals = 1;
 }
+
+message Test7 {
+    repeated string strings = 1;
+}
+
+message Test8 {
+    repeated string strings = 1;
+    repeated int32 integrals = 2;
+}

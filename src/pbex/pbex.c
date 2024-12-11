@@ -222,7 +222,16 @@ static bool _encode_list(pb_ostream_t* stream, const pb_field_t* field, void* co
             for (node = d->head; ret && node != NULL; node = node->next)
             {
                 ret = pb_encode_tag_for_field(stream, field);
-                ret = ret && pb_encode_submessage(stream, field->submsg_desc, node->data);
+
+                if (PB_LTYPE_IS_SUBMSG(field->type))
+                {
+                    ret = ret && pb_encode_submessage(stream, field->submsg_desc, node->data);
+                }
+                else
+                {
+                    const pbex_string_t* str = pbex_string_get(*(pb_callback_t*)node->data);
+                    ret                      = ret && pb_encode_string(stream, (pb_byte_t*)str->data, str->size - 1);
+                }
             }
         }
     }
@@ -316,75 +325,84 @@ static bool _decode_repeated(pb_istream_t* stream, const pb_field_t* field, void
     if (list)
     {
         pbex_list_node_t* node;
+        pb_callback_t*    callback;
 
-        if (field->submsg_desc)
+        node = list->allocator->alloc(list->allocator, sizeof(pbex_list_node_t) + list->item_size);
+
+        if (node)
         {
-            node = list->allocator->alloc(list->allocator, sizeof(pbex_list_node_t) + list->item_size);
+            _list_add_node(list, node);
 
-            if (node)
+            switch (PB_LTYPE(field->type))
             {
-                _list_add_node(list, node);
-
-                if (field->submsg_desc->default_value)
+                case PB_LTYPE_BOOL:
                 {
-                    memcpy(&node->data, field->submsg_desc->default_value, list->item_size);
+                    ret = pb_decode_bool(stream, (bool*)node->data);
+                    break;
                 }
 
-                ret = _prepare_decode(list->allocator, stream, field->submsg_desc, &node->data);
-                ret = ret && pb_decode(stream, field->submsg_desc, &node->data);
-            }
-        }
-        else
-        {
-            ret = true;
-            while (ret && stream->bytes_left)
-            {
-                node = list->allocator->alloc(list->allocator, sizeof(pbex_list_node_t) + list->item_size);
-
-                if (!node)
+                case PB_LTYPE_VARINT:
+                case PB_LTYPE_UVARINT:
                 {
-                    ret = false;
+                    ret = pb_decode_varint(stream, (uint64_t*)node->data);
+                    break;
                 }
-                else
+
+                case PB_LTYPE_SVARINT:
                 {
-                    _list_add_node(list, node);
+                    ret = pb_decode_svarint(stream, (int64_t*)node->data);
+                    break;
+                }
 
-                    switch (PB_LTYPE(field->type))
-                    {
-                        case PB_LTYPE_BOOL:
-                        {
-                            ret = pb_decode_bool(stream, (bool*)node->data);
-                            break;
-                        }
+                case PB_LTYPE_FIXED64:
+                {
+                    ret = pb_decode_fixed64(stream, node->data);
+                    break;
+                }
 
-                        case PB_LTYPE_VARINT:
-                        case PB_LTYPE_UVARINT:
-                        {
-                            ret = pb_decode_varint(stream, (uint64_t*)node->data);
-                            break;
-                        }
+                case PB_LTYPE_FIXED32:
+                {
+                    ret = pb_decode_fixed32(stream, node->data);
+                    break;
+                }
 
-                        case PB_LTYPE_SVARINT:
-                        {
-                            ret = pb_decode_svarint(stream, (int64_t*)node->data);
-                            break;
-                        }
+                case PB_LTYPE_BYTES:
+                {
+                    callback            = (pb_callback_t*)node->data;
+                    pbex_bytes_t* bytes = (pbex_bytes_t*)list->allocator->alloc(list->allocator,
+                                                                                stream->bytes_left
+                                                                                    + sizeof(pbex_bytes_t));
 
-                        case PB_LTYPE_FIXED64:
-                        {
-                            ret = pb_decode_fixed64(stream, node->data);
-                            break;
-                        }
+                    bytes->size = stream->bytes_left;
+                    pb_read(stream, bytes->data, stream->bytes_left);
+                    callback->arg          = bytes;
+                    callback->funcs.decode = _decode_bytes;
+                    ret                    = true;
+                    break;
+                }
 
-                        case PB_LTYPE_FIXED32:
-                        {
-                            ret = pb_decode_fixed32(stream, node->data);
-                            break;
-                        }
+                case PB_LTYPE_STRING:
+                {
+                    callback           = (pb_callback_t*)node->data;
+                    pbex_string_t* str = (pbex_string_t*)list->allocator->alloc(list->allocator,
+                                                                                stream->bytes_left + 1
+                                                                                    + sizeof(pbex_string_t));
 
-                        default:
-                            ret = false;
-                    }
+                    str->size = stream->bytes_left + 1;
+                    pb_read(stream, (uint8_t*)str->data, stream->bytes_left);
+                    str->data[str->size - 1] = '\0';
+                    callback->arg            = str;
+                    callback->funcs.decode   = _decode_string;
+                    ret                      = true;
+                    break;
+                }
+
+                case PB_LTYPE_SUBMESSAGE:
+                case PB_LTYPE_SUBMSG_W_CB:
+                {
+                    ret = _prepare_decode(list->allocator, stream, field->submsg_desc, &node->data);
+                    ret = ret && pb_decode(stream, field->submsg_desc, &node->data);
+                    break;
                 }
             }
         }
@@ -502,6 +520,13 @@ static bool _prepare_decode(pbex_allocator_t* allocator, pb_istream_t* stream, c
                                 break;
                             }
 
+                            case PB_LTYPE_BYTES:
+                            case PB_LTYPE_STRING:
+                            {
+                                list->item_size = sizeof(pb_callback_t);
+                                break;
+                            }
+
                             case PB_LTYPE_SUBMSG_W_CB:
                             case PB_LTYPE_SUBMESSAGE:
                             {
@@ -576,12 +601,7 @@ static bool _ostream_cb_stub(pb_ostream_t* stream, const pb_byte_t* buf, size_t 
 
 pb_ostream_t pbex_create_ostream_stub(void)
 {
-    pb_ostream_t stream = {0};
-
-    stream.callback = _ostream_cb_stub;
-    stream.max_size = SIZE_MAX;
-
-    return stream;
+    return (pb_ostream_t)PB_OSTREAM_SIZING;
 }
 
 //-----------------------------------------------
@@ -722,9 +742,22 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
 
                         while (node)
                         {
-                            if (it.submsg_desc)
+                            switch (PB_LTYPE(it.type))
                             {
-                                pbex_release(list->allocator, it.submsg_desc, &node->data);
+                                case PB_LTYPE_BYTES:
+                                case PB_LTYPE_STRING:
+                                {
+                                    pb_callback_t* sub_callback = (pb_callback_t*)node->data;
+                                    list->allocator->dealloc(list->allocator, sub_callback->arg);
+                                    break;
+                                }
+
+                                case PB_LTYPE_SUBMSG_W_CB:
+                                case PB_LTYPE_SUBMESSAGE:
+                                {
+                                    pbex_release(list->allocator, it.submsg_desc, &node->data);
+                                    break;
+                                }
                             }
 
                             pbex_list_node_t* prev_node = node;

@@ -32,12 +32,15 @@ static void _test3(pbex_allocator_t* allocator);
 static void _test4(pbex_allocator_t* allocator);
 static void _test5(pbex_allocator_t* allocator);
 static void _test6(pbex_allocator_t* allocator);
+static void _test7(pbex_allocator_t* allocator);
+static void _test8(pbex_allocator_t* allocator);
 
 int main(int argc, const char** argv)
 {
     _alloc_heap_test();
     _alloc_pool_test();
     _alloc_dl_test();
+    _lack_of_memory_test();
 }
 
 static void _alloc_heap_test(void)
@@ -97,10 +100,42 @@ void _lack_dealloc(pbex_allocator_t* allocator, void* ptr)
 
 static void _lack_of_memory_test(void)
 {
-    lack_allocator_t alloc = {
+    lack_allocator_t lack = {
         .allocator  = {.alloc = _lack_alloc, .dealloc = _lack_dealloc},
         .max_allocs = 5,
     };
+
+    uint8_t obuf[1024];
+
+    pbex_allocator_t nonlack = pbex_heap_allocator_create();
+
+    pb_ostream_t ostream = pb_ostream_from_buffer(obuf, sizeof(obuf));
+    pbex_Test6   out     = pbex_Test6_init_default;
+
+    out.integrals = pbex_list_alloc(&nonlack, sizeof(int32_t));
+    int32_t* it;
+    for (int i = 0; i < 10; i++)
+    {
+        it = pbex_list_add_node(out.integrals);
+        if (!it)
+        {
+            break;
+        }
+
+        *it = i;
+    }
+
+    TEST_EQUAL(pbex_encode(&ostream, pbex_Test6_fields, &out), true);
+    TEST_EQUAL(pbex_release(&nonlack, pbex_Test6_fields, &out), true);
+
+    // failed decoding and emergent release
+    pb_istream_t istream = pb_istream_from_buffer(obuf, ostream.bytes_written);
+    pbex_Test6   in      = pbex_Test6_init_default;
+    TEST_EQUAL(pbex_decode(&lack.allocator, &istream, pbex_Test6_fields, &in), false);
+
+    TEST_EQUAL(pbex_release(&lack.allocator, pbex_Test6_fields, &in), true);
+
+    TEST_EQUAL(lack.allocs, 0);
 }
 
 static void _all_test(pbex_allocator_t* allocator)
@@ -111,6 +146,8 @@ static void _all_test(pbex_allocator_t* allocator)
     _test4(allocator);
     _test5(allocator);
     _test6(allocator);
+    _test7(allocator);
+    _test8(allocator);
 }
 
 static void _test1(pbex_allocator_t* allocator)
@@ -333,27 +370,19 @@ static void _test6(pbex_allocator_t* allocator)
     uint8_t obuf[1024];
 
     pb_ostream_t ostream = pb_ostream_from_buffer(obuf, sizeof(obuf));
-
-    pbex_Test6 out = pbex_Test6_init_default;
+    pbex_Test6   out     = pbex_Test6_init_default;
 
     out.integrals = pbex_list_alloc(allocator, sizeof(int32_t));
 
     int32_t* it;
 
-    it  = pbex_list_add_node(out.integrals);
-    *it = 1;
+    for (int i = 1; i <= 5; i++)
+    {
 
-    it  = pbex_list_add_node(out.integrals);
-    *it = 2;
-
-    it  = pbex_list_add_node(out.integrals);
-    *it = 3;
-
-    it  = pbex_list_add_node(out.integrals);
-    *it = 4;
-
-    it  = pbex_list_add_node(out.integrals);
-    *it = 5;
+        it = pbex_list_add_node(out.integrals);
+        TEST_EQUAL(it == NULL, false);
+        *it = i;
+    }
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test6_fields, &out), true);
 
@@ -373,4 +402,50 @@ static void _test6(pbex_allocator_t* allocator)
 
     TEST_EQUAL(pbex_release(allocator, pbex_Test6_fields, &out), true);
     TEST_EQUAL(pbex_release(allocator, pbex_Test6_fields, &in), true);
+}
+
+static void _test7(pbex_allocator_t* allocator)
+{
+    uint8_t obuf[1024];
+
+    pb_ostream_t ostream = pb_ostream_from_buffer(obuf, sizeof(obuf));
+    pbex_Test7   out     = pbex_Test7_init_default;
+
+    out.strings = pbex_list_alloc(allocator, sizeof(pb_callback_t));
+
+    pb_callback_t* it;
+
+    it = pbex_list_add_node(out.strings);
+    TEST_EQUAL(it == NULL, false);
+    *it = pbex_string_alloc(allocator, "First", -1);
+
+    it = pbex_list_add_node(out.strings);
+    TEST_EQUAL(it == NULL, false);
+    *it = pbex_string_alloc(allocator, "Second", -1);
+
+    it = pbex_list_add_node(out.strings);
+    TEST_EQUAL(it == NULL, false);
+    *it = pbex_string_alloc(allocator, "Third", -1);
+
+    TEST_EQUAL(pbex_encode(&ostream, pbex_Test7_fields, &out), true);
+
+    pb_istream_t istream = pb_istream_from_buffer(obuf, ostream.bytes_written);
+    pbex_Test7   in      = pbex_Test7_init_default;
+    TEST_EQUAL(pbex_decode(allocator, &istream, pbex_Test7_fields, &in), true);
+
+    TEST_EQUAL(pbex_list_count(out.strings), pbex_list_count(in.strings));
+
+    pb_callback_t* it2;
+    for (it2 = pbex_list_get_node(in.strings, 0), it = pbex_list_get_node(out.strings, 0); it2 != NULL && it != NULL;
+         it2 = pbex_list_next_node(it2), it = pbex_list_next_node(it))
+    {
+        TEST_EQUAL(strcmp(pbex_cstring_get(*it), pbex_cstring_get(*it2)), 0);
+    }
+
+    TEST_EQUAL(pbex_release(allocator, pbex_Test7_fields, &out), true);
+    TEST_EQUAL(pbex_release(allocator, pbex_Test7_fields, &in), true);
+}
+
+static void _test8(pbex_allocator_t* allocator)
+{
 }
