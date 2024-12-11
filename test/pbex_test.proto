@@ -31,3 +31,7 @@ message Test4 {
 message Test5 {
     map<string, int32> kv = 1;
 }
+
+message Test6 {
+    repeated int32 integrals = 1;
+}

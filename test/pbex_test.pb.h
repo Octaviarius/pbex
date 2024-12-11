@@ -44,6 +44,10 @@ typedef struct _pbex_Test5_KvEntry {
     int32_t value;
 } pbex_Test5_KvEntry;
 
+typedef struct _pbex_Test6 {
+    pb_callback_t integrals;
+} pbex_Test6;
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,12 +60,14 @@ extern "C" {
 #define pbex_Test4_init_default                  {{{NULL}, NULL}}
 #define pbex_Test5_init_default                  {{{NULL}, NULL}}
 #define pbex_Test5_KvEntry_init_default          {{{NULL}, NULL}, 0}
+#define pbex_Test6_init_default                  {{{NULL}, NULL}}
 #define pbex_Test1_init_zero                     {0, 0}
 #define pbex_Test2_init_zero                     {0, 0, {{NULL}, NULL}, {{NULL}, NULL}}
 #define pbex_Test3_init_zero                     {{{NULL}, NULL}, 0, {pbex_Test1_init_zero}}
 #define pbex_Test4_init_zero                     {{{NULL}, NULL}}
 #define pbex_Test5_init_zero                     {{{NULL}, NULL}}
 #define pbex_Test5_KvEntry_init_zero             {{{NULL}, NULL}, 0}
+#define pbex_Test6_init_zero                     {{{NULL}, NULL}}
 
 /* Field tags (for use in manual encoding/decoding) */
 #define pbex_Test1_boolean_tag                   1
@@ -76,6 +82,7 @@ extern "C" {
 #define pbex_Test5_kv_tag                        1
 #define pbex_Test5_KvEntry_key_tag               1
 #define pbex_Test5_KvEntry_value_tag             2
+#define pbex_Test6_integrals_tag                 1
 
 /* Struct field encoding specification for nanopb */
 #define pbex_Test1_FIELDLIST(X, a) \
@@ -118,12 +125,18 @@ X(a, STATIC,   SINGULAR, INT32,    value,             2)
 #define pbex_Test5_KvEntry_CALLBACK pb_default_field_callback
 #define pbex_Test5_KvEntry_DEFAULT NULL
 
+#define pbex_Test6_FIELDLIST(X, a) \
+X(a, CALLBACK, REPEATED, INT32,    integrals,         1)
+#define pbex_Test6_CALLBACK pb_default_field_callback
+#define pbex_Test6_DEFAULT NULL
+
 extern const pb_msgdesc_t pbex_Test1_msg;
 extern const pb_msgdesc_t pbex_Test2_msg;
 extern const pb_msgdesc_t pbex_Test3_msg;
 extern const pb_msgdesc_t pbex_Test4_msg;
 extern const pb_msgdesc_t pbex_Test5_msg;
 extern const pb_msgdesc_t pbex_Test5_KvEntry_msg;
+extern const pb_msgdesc_t pbex_Test6_msg;
 
 /* Defines for backwards compatibility with code written before nanopb-0.4.0 */
 #define pbex_Test1_fields &pbex_Test1_msg
@@ -132,6 +145,7 @@ extern const pb_msgdesc_t pbex_Test5_KvEntry_msg;
 #define pbex_Test4_fields &pbex_Test4_msg
 #define pbex_Test5_fields &pbex_Test5_msg
 #define pbex_Test5_KvEntry_fields &pbex_Test5_KvEntry_msg
+#define pbex_Test6_fields &pbex_Test6_msg
 
 /* Maximum encoded size of messages (where known) */
 /* pbex_Test2_size depends on runtime parameters */
@@ -139,6 +153,7 @@ extern const pb_msgdesc_t pbex_Test5_KvEntry_msg;
 /* pbex_Test4_size depends on runtime parameters */
 /* pbex_Test5_size depends on runtime parameters */
 /* pbex_Test5_KvEntry_size depends on runtime parameters */
+/* pbex_Test6_size depends on runtime parameters */
 #define PBEX_PBEX_TEST_PB_H_MAX_SIZE             pbex_Test1_size
 #define pbex_Test1_size                          13
 

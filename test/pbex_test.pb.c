@@ -24,4 +24,7 @@ PB_BIND(pbex_Test5, pbex_Test5, AUTO)
 PB_BIND(pbex_Test5_KvEntry, pbex_Test5_KvEntry, AUTO)
 
 
+PB_BIND(pbex_Test6, pbex_Test6, AUTO)
+
+
 
