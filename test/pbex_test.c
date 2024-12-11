@@ -355,9 +355,9 @@ static void _test6(pbex_allocator_t* allocator)
     it  = pbex_list_add_node(out.integrals);
     *it = 5;
 
-    // TEST_EQUAL(pbex_encode(&ostream, pbex_Test6_fields, &out), true);
+    TEST_EQUAL(pbex_encode(&ostream, pbex_Test6_fields, &out), true);
 
-    pb_istream_t istream = pb_istream_from_buffer(obuf, 64);
+    pb_istream_t istream = pb_istream_from_buffer(obuf, ostream.bytes_written);
     pbex_Test6   in      = pbex_Test6_init_default;
     TEST_EQUAL(pbex_decode(allocator, &istream, pbex_Test6_fields, &in), true);
 
@@ -371,6 +371,6 @@ static void _test6(pbex_allocator_t* allocator)
         TEST_EQUAL(*it, *it2);
     }
 
-    TEST_EQUAL(pbex_release(allocator, pbex_Test5_fields, &out), true);
-    TEST_EQUAL(pbex_release(allocator, pbex_Test5_fields, &in), true);
+    TEST_EQUAL(pbex_release(allocator, pbex_Test6_fields, &out), true);
+    TEST_EQUAL(pbex_release(allocator, pbex_Test6_fields, &in), true);
 }
