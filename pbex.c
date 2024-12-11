@@ -942,9 +942,9 @@ void* pbex_list_next_node(const void* node)
     return ret;
 }
 
-pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, ssize_t len)
+pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, size_t len)
 {
-    if (len < 0)
+    if (len == 0)
     {
         if (str)
         {

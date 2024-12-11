@@ -9,20 +9,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#if SIZE_MAX == UINT8_MAX
-typedef int8_t ssize_t;
-#elif SIZE_MAX == UINT16_MAX
-typedef int16_t ssize_t;
-#elif SIZE_MAX == UINT32_MAX
-typedef int32_t ssize_t;
-#elif SIZE_MAX == UINT64_MAX
-typedef int64_t ssize_t;
-#elif SIZE_MAX == UINT128_MAX
-typedef int128_t ssize_t;
-#else
-#error "Can't define ssize_t"
-#endif
-
 #define PBEX_VERSION_MAJOR 2
 #define PBEX_VERSION_MINOR 0
 #define PBEX_VERSION_PATCH 0
@@ -407,7 +393,7 @@ void* pbex_list_next_node(const void* node);
  *
  * \return pb_callback_t
  */
-pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, ssize_t len);
+pb_callback_t pbex_string_alloc(pbex_allocator_t* allocator, const char* str, size_t len);
 
 /**
  * \brief Set string for encoding.
