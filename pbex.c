@@ -169,10 +169,6 @@ static bool _encode_list(pb_ostream_t* stream, const pb_field_t* field, void* co
     {
         pbex_list_node_t* node;
 
-        uint16_t ltype = PB_LTYPE(field->type);
-        uint16_t atype = PB_ATYPE(field->type);
-        uint16_t htype = PB_HTYPE(field->type);
-
         if (PB_LTYPE(field->type) <= PB_LTYPE_LAST_PACKABLE)
         {
             size_t       size = 0;
@@ -739,9 +735,6 @@ bool pbex_release(pbex_allocator_t* allocator, const pb_msgdesc_t* descr, void* 
     do
     {
         pb_callback_t* callback = NULL;
-        uint16_t       ltype    = PB_LTYPE(it.type);
-        uint16_t       atype    = PB_ATYPE(it.type);
-        uint16_t       htype    = PB_HTYPE(it.type);
 
         switch (PB_HTYPE(it.type))
         {
