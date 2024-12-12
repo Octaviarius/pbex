@@ -16,6 +16,16 @@
         }                                                                                                              \
     } while (0)
 
+#define TEST_NOT_EQUAL(a, b)                                                                                           \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if ((a) == (b))                                                                                                \
+        {                                                                                                              \
+            printf("Line " STRINGIFY(__LINE__) ": " STRINGIFY(a) " equal " STRINGIFY(b) "\r\n");                       \
+            exit(1);                                                                                                   \
+        }                                                                                                              \
+    } while (0)
+
 #define __STRINGIFY(x) #x
 #define STRINGIFY(x)   __STRINGIFY(x)
 
@@ -52,7 +62,7 @@ static void _alloc_heap_test(void)
 
 static void _alloc_pool_test(void)
 {
-    uint8_t poolbuf[2048];
+    uint8_t poolbuf[4096];
 
     pbex_pool_allocator_t alloc;
 
@@ -186,7 +196,7 @@ static void _test2(pbex_allocator_t* allocator)
     static const char    chars[] = "Surprise, motherfucker!";
 
     out.byteArray = pbex_bytes_alloc(allocator, bytes, COUNT_OF(bytes));
-    out.string    = pbex_string_alloc(allocator, chars, -1);
+    out.string    = pbex_string_alloc(allocator, chars, 0);
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test2_fields, &out), true);
 
@@ -197,7 +207,7 @@ static void _test2(pbex_allocator_t* allocator)
     TEST_EQUAL(out.boolean, in.boolean);
     TEST_EQUAL(out.integral, in.integral);
     TEST_EQUAL(strcmp(pbex_cstring_get(out.string), pbex_cstring_get(in.string)), 0);
-    TEST_EQUAL(memcmp(pbex_bytes_get(out.byteArray)->data, pbex_bytes_get(in.byteArray)->data, 10), 0);
+    TEST_EQUAL(memcmp(pbex_bytes_get(out.byteArray).data, pbex_bytes_get(in.byteArray).data, 10), 0);
 
     TEST_EQUAL(pbex_release(allocator, pbex_Test2_fields, &out), true);
     TEST_EQUAL(pbex_release(allocator, pbex_Test2_fields, &in), true);
@@ -238,7 +248,7 @@ static void _test3(pbex_allocator_t* allocator)
     static const char    chars[] = "Surprise, motherfucker!";
 
     out.body.item2.byteArray = pbex_bytes_alloc(allocator, bytes, COUNT_OF(bytes));
-    out.body.item2.string    = pbex_string_alloc(allocator, chars, -1);
+    out.body.item2.string    = pbex_string_alloc(allocator, chars, 0);
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test3_fields, &out), true);
 
@@ -250,8 +260,8 @@ static void _test3(pbex_allocator_t* allocator)
     TEST_EQUAL(out.body.item2.boolean, in.body.item2.boolean);
     TEST_EQUAL(out.body.item2.integral, in.body.item2.integral);
     TEST_EQUAL(strcmp(pbex_cstring_get(out.body.item2.string), pbex_cstring_get(in.body.item2.string)), 0);
-    TEST_EQUAL(memcmp(pbex_bytes_get(out.body.item2.byteArray)->data,
-                      pbex_bytes_get(in.body.item2.byteArray)->data,
+    TEST_EQUAL(memcmp(pbex_bytes_get(out.body.item2.byteArray).data,
+                      pbex_bytes_get(in.body.item2.byteArray).data,
                       10),
                0);
 
@@ -318,31 +328,31 @@ static void _test5(pbex_allocator_t* allocator)
     pbex_Test5_KvEntry* it;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "alpha", -1);
+    it->key   = pbex_string_alloc(allocator, "alpha", 0);
     it->value = 1;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "beta", -1);
+    it->key   = pbex_string_alloc(allocator, "beta", 0);
     it->value = 2;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "gamma", -1);
+    it->key   = pbex_string_alloc(allocator, "gamma", 0);
     it->value = 3;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "delta", -1);
+    it->key   = pbex_string_alloc(allocator, "delta", 0);
     it->value = 4;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "dzeta", -1);
+    it->key   = pbex_string_alloc(allocator, "dzeta", 0);
     it->value = 5;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "eta", -1);
+    it->key   = pbex_string_alloc(allocator, "eta", 0);
     it->value = 6;
 
     it        = pbex_list_add_node(out.kv);
-    it->key   = pbex_string_alloc(allocator, "theta", -1);
+    it->key   = pbex_string_alloc(allocator, "theta", 0);
     it->value = 7;
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test5_fields, &out), true);
@@ -374,14 +384,13 @@ static void _test6(pbex_allocator_t* allocator)
 
     out.integrals = pbex_list_alloc(allocator, sizeof(int32_t));
 
-    int32_t* it;
+    int32_t* i1;
 
     for (int i = 1; i <= 5; i++)
     {
-
-        it = pbex_list_add_node(out.integrals);
-        TEST_EQUAL(it == NULL, false);
-        *it = i;
+        i1 = pbex_list_add_node(out.integrals);
+        TEST_NOT_EQUAL(i1, NULL);
+        *i1 = i;
     }
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test6_fields, &out), true);
@@ -392,12 +401,12 @@ static void _test6(pbex_allocator_t* allocator)
 
     TEST_EQUAL(pbex_list_count(out.integrals), pbex_list_count(in.integrals));
 
-    int32_t* it2;
-    for (it2 = pbex_list_get_node(in.integrals, 0), it = pbex_list_get_node(out.integrals, 0);
-         it2 != NULL && it != NULL;
-         it2 = pbex_list_next_node(it2), it = pbex_list_next_node(it))
+    int32_t* i2;
+    for (i2 = pbex_list_get_node(in.integrals, 0), i1 = pbex_list_get_node(out.integrals, 0); i2 != NULL && i1 != NULL;
+         i2 = pbex_list_next_node(i2), i1 = pbex_list_next_node(i1))
     {
-        TEST_EQUAL(*it, *it2);
+        TEST_NOT_EQUAL(*i1, 0);
+        TEST_EQUAL(*i1, *i2);
     }
 
     TEST_EQUAL(pbex_release(allocator, pbex_Test6_fields, &out), true);
@@ -413,19 +422,19 @@ static void _test7(pbex_allocator_t* allocator)
 
     out.strings = pbex_list_alloc(allocator, sizeof(pb_callback_t));
 
-    pb_callback_t* it;
+    pb_callback_t* s1;
 
-    it = pbex_list_add_node(out.strings);
-    TEST_EQUAL(it == NULL, false);
-    *it = pbex_string_alloc(allocator, "First", -1);
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "First", 0);
 
-    it = pbex_list_add_node(out.strings);
-    TEST_EQUAL(it == NULL, false);
-    *it = pbex_string_alloc(allocator, "Second", -1);
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "Second", 0);
 
-    it = pbex_list_add_node(out.strings);
-    TEST_EQUAL(it == NULL, false);
-    *it = pbex_string_alloc(allocator, "Third", -1);
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "Third", 0);
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test7_fields, &out), true);
 
@@ -435,11 +444,12 @@ static void _test7(pbex_allocator_t* allocator)
 
     TEST_EQUAL(pbex_list_count(out.strings), pbex_list_count(in.strings));
 
-    pb_callback_t* it2;
-    for (it2 = pbex_list_get_node(in.strings, 0), it = pbex_list_get_node(out.strings, 0); it2 != NULL && it != NULL;
-         it2 = pbex_list_next_node(it2), it = pbex_list_next_node(it))
+    pb_callback_t* s2;
+    for (s2 = pbex_list_get_node(in.strings, 0), s1 = pbex_list_get_node(out.strings, 0); s2 != NULL && s1 != NULL;
+         s2 = pbex_list_next_node(s2), s1 = pbex_list_next_node(s1))
     {
-        TEST_EQUAL(strcmp(pbex_cstring_get(*it), pbex_cstring_get(*it2)), 0);
+        TEST_NOT_EQUAL(pbex_cstring_get(*s1), 0);
+        TEST_EQUAL(strcmp(pbex_cstring_get(*s1), pbex_cstring_get(*s2)), 0);
     }
 
     TEST_EQUAL(pbex_release(allocator, pbex_Test7_fields, &out), true);
@@ -448,4 +458,61 @@ static void _test7(pbex_allocator_t* allocator)
 
 static void _test8(pbex_allocator_t* allocator)
 {
+    uint8_t obuf[1024];
+
+    pb_ostream_t ostream = pb_ostream_from_buffer(obuf, sizeof(obuf));
+    pbex_Test8   out     = pbex_Test8_init_default;
+
+    out.strings = pbex_list_alloc(allocator, sizeof(pb_callback_t));
+
+    pb_callback_t* s1;
+
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "First", 0);
+
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "Second", 0);
+
+    s1 = pbex_list_add_node(out.strings);
+    TEST_EQUAL(s1 == NULL, false);
+    *s1 = pbex_string_alloc(allocator, "Third", 0);
+
+    out.integrals = pbex_list_alloc(allocator, sizeof(pb_callback_t));
+    int32_t* i1;
+
+    for (int i = 1; i <= 5; i++)
+    {
+        i1 = pbex_list_add_node(out.integrals);
+        TEST_NOT_EQUAL(i1, NULL);
+        *i1 = i;
+    }
+
+    TEST_EQUAL(pbex_encode(&ostream, pbex_Test8_fields, &out), true);
+
+    pb_istream_t istream = pb_istream_from_buffer(obuf, ostream.bytes_written);
+    pbex_Test8   in      = pbex_Test8_init_default;
+    TEST_EQUAL(pbex_decode(allocator, &istream, pbex_Test8_fields, &in), true);
+
+    TEST_EQUAL(pbex_list_count(out.strings), pbex_list_count(in.strings));
+    pb_callback_t* s2;
+    for (s2 = pbex_list_get_node(in.strings, 0), s1 = pbex_list_get_node(out.strings, 0); s2 != NULL && s1 != NULL;
+         s2 = pbex_list_next_node(s2), s1 = pbex_list_next_node(s1))
+    {
+        TEST_NOT_EQUAL(pbex_cstring_get(*s1), 0);
+        TEST_EQUAL(strcmp(pbex_cstring_get(*s1), pbex_cstring_get(*s2)), 0);
+    }
+
+    TEST_EQUAL(pbex_list_count(out.integrals), pbex_list_count(in.integrals));
+    int32_t* i2;
+    for (i2 = pbex_list_get_node(in.integrals, 0), i1 = pbex_list_get_node(out.integrals, 0); i2 != NULL && i1 != NULL;
+         i2 = pbex_list_next_node(i2), i1 = pbex_list_next_node(i1))
+    {
+        TEST_NOT_EQUAL(*i1, 0);
+        TEST_EQUAL(*i1, *i2);
+    }
+
+    TEST_EQUAL(pbex_release(allocator, pbex_Test8_fields, &out), true);
+    TEST_EQUAL(pbex_release(allocator, pbex_Test8_fields, &in), true);
 }

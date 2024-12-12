@@ -215,8 +215,8 @@ size_t pbex_dl_allocator_count(pbex_dl_allocator_t* allocator);
  */
 typedef struct
 {
-    size_t size;   //!< Size of block chunk (including null symbol)
-    char   data[]; //!< Null-terminated string
+    size_t      size; //!< Size of block chunk (including null symbol)
+    const char* data; //!< Null-terminated string
 } pbex_string_t;
 
 /**
@@ -225,8 +225,8 @@ typedef struct
  */
 typedef struct
 {
-    size_t  size;   //!< Size of data
-    uint8_t data[]; //!< Raw data
+    size_t         size; //!< Size of data
+    const uint8_t* data; //!< Raw data
 } pbex_bytes_t;
 
 /**
@@ -421,9 +421,9 @@ pb_callback_t pbex_cstring_set(const char* str);
  *
  * \param callback
  *
- * \return const pbex_string_t*
+ * \return pbex_string_t
  */
-const pbex_string_t* pbex_string_get(pb_callback_t callback);
+pbex_string_t pbex_string_get(pb_callback_t callback);
 
 /**
  * \brief Get string data directly to variables. It's a syntax sugar.
@@ -473,9 +473,9 @@ pb_callback_t pbex_bytes_set(const pbex_bytes_t* bytes);
  *
  * \param callback
  *
- * \return const pbex_bytes_t*
+ * \return pbex_bytes_t
  */
-const pbex_bytes_t* pbex_bytes_get(pb_callback_t callback);
+pbex_bytes_t pbex_bytes_get(pb_callback_t callback);
 
 /**
  * \brief Get bytes data directly to variables. It's a syntax sugar.
