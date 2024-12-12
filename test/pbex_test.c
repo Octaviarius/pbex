@@ -37,7 +37,7 @@ static void _lack_of_memory_test(void);
 static void _all_test(pbex_allocator_t* allocator);
 
 static void _test1(pbex_allocator_t* allocator);
-static void _test2(pbex_allocator_t* allocator);
+static void _test2(pbex_allocator_t* allocator, bool statically);
 static void _test3(pbex_allocator_t* allocator);
 static void _test4(pbex_allocator_t* allocator);
 static void _test5(pbex_allocator_t* allocator);
@@ -151,7 +151,8 @@ static void _lack_of_memory_test(void)
 static void _all_test(pbex_allocator_t* allocator)
 {
     _test1(allocator);
-    _test2(allocator);
+    _test2(allocator, true);
+    _test2(allocator, false);
     _test3(allocator);
     _test4(allocator);
     _test5(allocator);
@@ -183,7 +184,7 @@ static void _test1(pbex_allocator_t* allocator)
     TEST_EQUAL(pbex_release(allocator, pbex_Test1_fields, &in), true);
 }
 
-static void _test2(pbex_allocator_t* allocator)
+static void _test2(pbex_allocator_t* allocator, bool statically)
 {
     uint8_t obuf[1024];
 
@@ -195,8 +196,26 @@ static void _test2(pbex_allocator_t* allocator)
     static const uint8_t bytes[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
     static const char    chars[] = "Surprise, motherfucker!";
 
-    out.byteArray = pbex_bytes_alloc(allocator, bytes, COUNT_OF(bytes));
-    out.string    = pbex_string_alloc(allocator, chars, 0);
+    pbex_bytes_t sbytes = {
+        .size = COUNT_OF(bytes),
+        .data = bytes,
+    };
+
+    pbex_string_t sstring = {
+        .size = COUNT_OF(chars),
+        .data = chars,
+    };
+
+    if (statically)
+    {
+        out.byteArray = pbex_bytes_set(&sbytes);
+        out.string    = pbex_string_set(&sstring);
+    }
+    else
+    {
+        out.byteArray = pbex_bytes_alloc(allocator, bytes, COUNT_OF(bytes));
+        out.string    = pbex_string_alloc(allocator, chars, 0);
+    }
 
     TEST_EQUAL(pbex_encode(&ostream, pbex_Test2_fields, &out), true);
 
@@ -260,9 +279,7 @@ static void _test3(pbex_allocator_t* allocator)
     TEST_EQUAL(out.body.item2.boolean, in.body.item2.boolean);
     TEST_EQUAL(out.body.item2.integral, in.body.item2.integral);
     TEST_EQUAL(strcmp(pbex_cstring_get(out.body.item2.string), pbex_cstring_get(in.body.item2.string)), 0);
-    TEST_EQUAL(memcmp(pbex_bytes_get(out.body.item2.byteArray).data,
-                      pbex_bytes_get(in.body.item2.byteArray).data,
-                      10),
+    TEST_EQUAL(memcmp(pbex_bytes_get(out.body.item2.byteArray).data, pbex_bytes_get(in.body.item2.byteArray).data, 10),
                0);
 
     pbex_release(allocator, pbex_Test3_fields, &out);
